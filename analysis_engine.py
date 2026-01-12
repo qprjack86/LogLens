@@ -115,7 +115,7 @@ def analyze_with_ai(sanitized_snippet):
        - Columns: [Code, Meaning, Context, Documentation]
        - **Documentation Strategy (CRITICAL):**
          - If the code is a standard Windows Error (e.g., 0x5, 0x20, 0x32, 0x00000002), YOU MUST link to: `https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes`
-         - If the code is FSLogix specific (e.g., FrxStatus), link to: `https://learn.microsoft.com/en-us/fslogix/troubleshooting-known-issues`
+         - If the code is FSLogix specific (e.g., FrxStatus), link to: `https://learn.microsoft.com/en-us/fslogix/troubleshooting-error-codes`
          - Only if no direct link applies, use a Google Search: `https://www.google.com/search?q=fslogix+error+[CODE]+[CONTEXT]`
 
     3. **Separator:**
