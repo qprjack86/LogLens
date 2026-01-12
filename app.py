@@ -3,6 +3,7 @@ from openai import AzureOpenAI
 import zipfile
 import re
 import os
+import pandas as pd
 from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
@@ -53,6 +54,24 @@ def sanitize_log(log_content):
     log_content = re.sub(r'\\\\([a-zA-Z0-9\.\-_]+)', r'\\\\[FILE_SERVER]', log_content)
     return log_content
 
+def get_log_timeline(log_content):
+    """
+    Parses timestamps to create a 'Log Activity' chart.
+    Helps visualize hangs (long gaps) vs busy processing.
+    """
+    # FSLogix Format: [12:30:45.123] -> Grab HH:MM:SS
+    matches = re.findall(r"^\[(\d{2}:\d{2}:\d{2})", log_content, re.MULTILINE)
+    
+    if not matches: return None
+
+    # Create Dataframe
+    df = pd.DataFrame(matches, columns=['Time'])
+    df['Count'] = 1
+    
+    # Aggregate by Second (Events per Second)
+    timeline_data = df.groupby('Time').count().reset_index()
+    return timeline_data
+
 def extract_performance_metrics(log_content):
     """
     Extracts timings. Returns 'Failed'/Context if errors exist but timings are missing.
@@ -101,7 +120,6 @@ def analyze_with_ai(sanitized_snippet):
     if not sanitized_snippet or len(sanitized_snippet) < 5:
         return "ERROR_EMPTY", None
 
-    # --- PROMPT: REMOVE REDUNDANT TITLES ---
     prompt = f"""
     You are a Senior FSLogix Escalation Engineer.
     Analyze the log snippet below.
@@ -110,7 +128,7 @@ def analyze_with_ai(sanitized_snippet):
 
     1. **ROOT CAUSE EXECUTIVE SUMMARY** (Text Only):
        - Start with a header: `### 🎯 Root Cause: [Short Reason]`
-       - Write 2-3 sentences explaining exactly *why* this happened.
+       - Write 2-3 sentences explaining exactly *why* this happened based on the logs.
 
     2. **ERROR CODE TABLE** (Markdown Table):
        - Summarize unique error codes.
@@ -138,7 +156,7 @@ def analyze_with_ai(sanitized_snippet):
         return response.choices[0].message.content, response.usage
     except Exception as e:
         return f"Error: {str(e)}", None
-    
+
 # --- MAIN UI ---
 st.title("🔍 FSLogix AI Analyser")
 st.markdown("""
@@ -202,6 +220,13 @@ if uploaded_files:
                 delta_color="inverse",
                 help="Number of lines tagged with [ERROR] in the log."
             )
+
+            # --- VISUAL TIMELINE ---
+            timeline_df = get_log_timeline(processed_text)
+            if timeline_df is not None and not timeline_df.empty:
+                st.line_chart(timeline_df, x='Time', y='Count', color="#0078D4", height=200)
+                st.caption("📈 **Timeline Analysis:** Spikes indicate heavy processing. Flat lines indicate network waits or hangs.")
+            
             st.divider()
 
         snippet = extract_errors(processed_text)
@@ -216,18 +241,15 @@ if uploaded_files:
                     "result": raw_response
                 })
 
-                # --- DISPLAY RESULTS ---
                 if "|||SPLIT|||" in raw_response:
                     part1, part2 = raw_response.split("|||SPLIT|||")
+                    c1, c2 = st.columns(2)
                     
-                    col_left, col_right = st.columns(2)
-                    
-                    with col_left:
-                        # Part 1 has the Root Cause Header AND the Error Table
+                    with c1:
+                        # Root Cause & Error Table
                         st.markdown(part1) 
-                        
-                    with col_right:
-                        
+                    with c2:
+                        # Renamed Title
                         st.subheader("🛠️ Suggested Troubleshooting Plan")
                         st.markdown(part2)
                 else:
@@ -252,6 +274,7 @@ with st.sidebar:
         with st.expander(f"{item['timestamp']} - {item['files'][:20]}..."):
             if "|||SPLIT|||" in item['result']:
                 parts = item['result'].split("|||SPLIT|||")
-                st.markdown("**Errors:**\n" + parts[0])
+                st.markdown("**Root Cause:**\n" + parts[0])
+                st.markdown("---")
                 st.markdown("**Fixes:**\n" + parts[1])
             else: st.markdown(item['result'])
