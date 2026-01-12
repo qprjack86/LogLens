@@ -10,7 +10,7 @@ from analysis_engine import (
     extract_errors, 
     analyze_with_ai, 
     save_feedback,
-    ask_log_question # Imported the new function
+    ask_log_question 
 )
 
 # --- PAGE CONFIGURATION ---
@@ -20,7 +20,7 @@ st.set_page_config(page_title="FSLogix Log Analyser", page_icon="🔍", layout="
 if "report_history" not in st.session_state: st.session_state.report_history = []
 if "active_analysis" not in st.session_state: st.session_state.active_analysis = None
 if "active_snippet" not in st.session_state: st.session_state.active_snippet = None
-if "qa_history" not in st.session_state: st.session_state.qa_history = [] # For Q&A
+if "qa_history" not in st.session_state: st.session_state.qa_history = [] 
 
 # --- MAIN UI ---
 st.title("🔍 FSLogix AI Analyser")
@@ -76,9 +76,7 @@ if uploaded_files:
         
         if st.button("Run Analysis", type="primary"):
             with st.spinner('Analyzing...'):
-                # Reset Q&A on new analysis
-                st.session_state.qa_history = []
-                
+                st.session_state.qa_history = [] # Reset Q&A
                 raw_response, usage_stats = analyze_with_ai(snippet)
                 st.session_state.active_analysis = raw_response
                 st.session_state.active_snippet = snippet
@@ -92,39 +90,25 @@ if uploaded_files:
         if st.session_state.active_analysis:
             raw_response = st.session_state.active_analysis
             
+            # --- LAYOUT FIX: STACKED instead of COLUMNS ---
             if "|||SPLIT|||" in raw_response:
                 part1, part2 = raw_response.split("|||SPLIT|||")
-                c1, c2 = st.columns(2)
-                with c1: st.markdown(part1)
-                with c2: 
-                    st.subheader("🛠️ Suggested Troubleshooting Plan")
-                    st.markdown(part2)
+                
+                # Part 1: Root Cause & Error Table (FULL WIDTH)
+                st.markdown(part1) 
+                
+                st.divider()
+                
+                # Part 2: Troubleshooting (FULL WIDTH)
+                st.subheader("🛠️ Suggested Troubleshooting Plan")
+                st.markdown(part2)
             else:
                 st.warning("Raw Output:")
                 st.markdown(raw_response)
             
             st.divider()
 
-            # --- NEW: ASK THE LOG (Q&A) ---
-            st.subheader("💬 Ask the Log")
-            st.caption("Ask specific questions like 'What time did the VHD attach?' or 'Was the network down?'")
-            
-            # Display History
-            for q, a in st.session_state.qa_history:
-                with st.chat_message("user"): st.write(q)
-                with st.chat_message("assistant"): st.write(a)
-
-            # Input
-            if question := st.chat_input("Ask a question about this log..."):
-                with st.chat_message("user"): st.write(question)
-                with st.spinner("Checking log..."):
-                    answer = ask_log_question(st.session_state.active_snippet, question)
-                    with st.chat_message("assistant"): st.write(answer)
-                    st.session_state.qa_history.append((question, answer))
-            
-            st.divider()
-            
-            # --- FEEDBACK & DOWNLOAD ---
+            # --- FEEDBACK & DOWNLOAD (MIDDLE SECTION) ---
             c_feed, c_dl = st.columns([3, 1])
             with c_feed:
                 st.subheader("📢 Rate Analysis")
@@ -137,6 +121,25 @@ if uploaded_files:
             with c_dl:
                 st.download_button("📥 Download Report", raw_response.replace("|||SPLIT|||", "\n\n## Troubleshooting\n"), "fslogix_report.md")
 
+            st.divider()
+
+            # --- ASK THE LOG (BOTTOM SECTION) ---
+            st.subheader("💬 Ask the Log")
+            st.caption("Ask specific questions like 'What time did the VHD attach?' or 'Was the network down?'")
+            
+            # Display History
+            for q, a in st.session_state.qa_history:
+                with st.chat_message("user"): st.write(q)
+                with st.chat_message("assistant"): st.write(a)
+
+            # Input (Pins to bottom)
+            if question := st.chat_input("Ask a question about this log..."):
+                with st.chat_message("user"): st.write(question)
+                with st.spinner("Checking log..."):
+                    answer = ask_log_question(st.session_state.active_snippet, question)
+                    with st.chat_message("assistant"): st.write(answer)
+                    st.session_state.qa_history.append((question, answer))
+            
     elif uploaded_files: st.error("❌ Could not decode files.")
 
 # --- SIDEBAR HISTORY ---
