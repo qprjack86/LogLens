@@ -113,13 +113,16 @@ def analyze_with_ai(sanitized_snippet):
     2. **ERROR CODE TABLE** (Markdown Table):
        - Summarize unique error codes.
        - Columns: [Code, Meaning, Context, Documentation]
-       - **Instruction:** In the 'Documentation' column, provide a generic Microsoft Learn search link or official KBA if known.
+       - **Documentation Strategy (CRITICAL):**
+         - If the code is a standard Windows Error (e.g., 0x5, 0x20, 0x32, 0x00000002), YOU MUST link to: `https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes`
+         - If the code is FSLogix specific (e.g., FrxStatus), link to: `https://learn.microsoft.com/en-us/fslogix/troubleshooting-known-issues`
+         - Only if no direct link applies, use a Google Search: `https://www.google.com/search?q=fslogix+error+[CODE]+[CONTEXT]`
 
     3. **Separator:**
        - IMMEDIATELY AFTER the error table, print exactly: |||SPLIT|||
 
     4. **TROUBLESHOOTING TABLE** (Markdown Table Only):
-       - **CRITICAL INSTRUCTION:** Do NOT print a text title (like "Troubleshooting Plan").
+       - **CRITICAL INSTRUCTION:** Do NOT print a text title.
        - **Start IMMEDIATELY** with the Markdown table headers.
        - **Columns:** [Step, Phase, Action, Command/Detail]
        - **Mandatory Flow:**
