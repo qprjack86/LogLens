@@ -3,6 +3,7 @@ import csv
 import os
 import streamlit as st
 from datetime import datetime
+from collections import deque
 from azure_client import client, DEPLOYMENT_NAME
 
 def decode_file(bytes_data):
@@ -41,18 +42,42 @@ def extract_performance_metrics(log_content):
 def extract_errors(log_content):
     lines = log_content.split('\n')
     relevant_lines = []
+    
+    # 1. Keep a running buffer of the last 3 lines (Pre-Context)
+    # This helps catch "Disk Full" or "Network Timeout" events that occur 
+    # immediately *before* the actual [ERROR] tag.
+    line_buffer = deque(maxlen=3) 
+    
     count = 0
     for line in lines:
         if any(keyword in line for keyword in ["ERROR", "Reason:", "Status:"]):
+            # Add the context (lines leading up to the error)
+            relevant_lines.extend(list(line_buffer))
+            # Add the error line itself
             relevant_lines.append(line.strip())
+            # Add a visual separator for the AI
+            relevant_lines.append("---")
+            
             count += 1
             if count >= 40: 
                 relevant_lines.append("... [Truncated] ...")
                 break
+        
+        # Update buffer
+        line_buffer.append(line.strip())
+            
     if not relevant_lines:
         relevant_lines = ["--- No explicit ERROR tags found. Showing last 20 lines ---"] + lines[-20:]
     
-    full_text = "\n".join(relevant_lines)
+    # Deduplicate lines while preserving order
+    seen = set()
+    final_lines = []
+    for line in relevant_lines:
+        if line not in seen:
+            final_lines.append(line)
+            seen.add(line)
+    
+    full_text = "\n".join(final_lines)
     if len(full_text) > 12000: return full_text[:12000] + "\n... [Hard truncated]"
     return full_text
 
@@ -62,7 +87,6 @@ def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(['Timestamp', 'Sentiment', 'Feedback', 'Snippet', 'AI_Response'])
-        
         writer.writerow([
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             sentiment,
@@ -88,7 +112,8 @@ def analyze_with_ai(sanitized_snippet):
 
     2. **ERROR CODE TABLE** (Markdown Table):
        - Summarize unique error codes.
-       - Columns: [Code, Meaning, Context]
+       - Columns: [Code, Meaning, Context, Documentation]
+       - **Instruction:** In the 'Documentation' column, provide a generic Microsoft Learn search link or official KBA if known.
 
     3. **Separator:**
        - IMMEDIATELY AFTER the error table, print exactly: |||SPLIT|||
@@ -112,3 +137,27 @@ def analyze_with_ai(sanitized_snippet):
         return response.choices[0].message.content, response.usage
     except Exception as e:
         return f"Error: {str(e)}", None
+
+# --- NEW: Q&A Function ---
+def ask_log_question(snippet, question):
+    """
+    Allows the user to ask specific follow-up questions about the log.
+    """
+    prompt = f"""
+    You are an FSLogix Log Assistant.
+    Context (Log Snippet):
+    {snippet}
+    
+    User Question: "{question}"
+    
+    Answer concisely based ONLY on the log data provided. If the log doesn't show the answer, say "Not found in log snippet."
+    """
+    try:
+        response = client.chat.completions.create(
+            model=DEPLOYMENT_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error: {str(e)}"

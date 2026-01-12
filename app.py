@@ -9,7 +9,8 @@ from analysis_engine import (
     extract_performance_metrics, 
     extract_errors, 
     analyze_with_ai, 
-    save_feedback
+    save_feedback,
+    ask_log_question # Imported the new function
 )
 
 # --- PAGE CONFIGURATION ---
@@ -19,6 +20,7 @@ st.set_page_config(page_title="FSLogix Log Analyser", page_icon="🔍", layout="
 if "report_history" not in st.session_state: st.session_state.report_history = []
 if "active_analysis" not in st.session_state: st.session_state.active_analysis = None
 if "active_snippet" not in st.session_state: st.session_state.active_snippet = None
+if "qa_history" not in st.session_state: st.session_state.qa_history = [] # For Q&A
 
 # --- MAIN UI ---
 st.title("🔍 FSLogix AI Analyser")
@@ -74,6 +76,9 @@ if uploaded_files:
         
         if st.button("Run Analysis", type="primary"):
             with st.spinner('Analyzing...'):
+                # Reset Q&A on new analysis
+                st.session_state.qa_history = []
+                
                 raw_response, usage_stats = analyze_with_ai(snippet)
                 st.session_state.active_analysis = raw_response
                 st.session_state.active_snippet = snippet
@@ -83,7 +88,7 @@ if uploaded_files:
                     "result": raw_response
                 })
         
-        # --- RESULTS & FEEDBACK ---
+        # --- RESULTS ---
         if st.session_state.active_analysis:
             raw_response = st.session_state.active_analysis
             
@@ -99,15 +104,38 @@ if uploaded_files:
                 st.markdown(raw_response)
             
             st.divider()
-            
-            st.subheader("📢 Rate this Analysis")
-            sentiment = st.feedback("thumbs")
-            if sentiment is not None:
-                sentiment_text = "Positive" if sentiment == 1 else "Negative"
-                save_feedback(sentiment_text, "User Voted", st.session_state.active_snippet, raw_response)
-                st.toast(f"Thank you for your feedback! ({sentiment_text})")
 
-            st.download_button("📥 Download Report", raw_response.replace("|||SPLIT|||", "\n\n## Troubleshooting\n"), "fslogix_report.md")
+            # --- NEW: ASK THE LOG (Q&A) ---
+            st.subheader("💬 Ask the Log")
+            st.caption("Ask specific questions like 'What time did the VHD attach?' or 'Was the network down?'")
+            
+            # Display History
+            for q, a in st.session_state.qa_history:
+                with st.chat_message("user"): st.write(q)
+                with st.chat_message("assistant"): st.write(a)
+
+            # Input
+            if question := st.chat_input("Ask a question about this log..."):
+                with st.chat_message("user"): st.write(question)
+                with st.spinner("Checking log..."):
+                    answer = ask_log_question(st.session_state.active_snippet, question)
+                    with st.chat_message("assistant"): st.write(answer)
+                    st.session_state.qa_history.append((question, answer))
+            
+            st.divider()
+            
+            # --- FEEDBACK & DOWNLOAD ---
+            c_feed, c_dl = st.columns([3, 1])
+            with c_feed:
+                st.subheader("📢 Rate Analysis")
+                sentiment = st.feedback("thumbs")
+                if sentiment is not None:
+                    sentiment_text = "Positive" if sentiment == 1 else "Negative"
+                    save_feedback(sentiment_text, "User Voted", st.session_state.active_snippet, raw_response)
+                    st.toast(f"Feedback Saved: {sentiment_text}")
+            
+            with c_dl:
+                st.download_button("📥 Download Report", raw_response.replace("|||SPLIT|||", "\n\n## Troubleshooting\n"), "fslogix_report.md")
 
     elif uploaded_files: st.error("❌ Could not decode files.")
 
