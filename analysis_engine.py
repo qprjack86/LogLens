@@ -125,6 +125,8 @@ def analyze_with_ai(sanitized_snippet):
          - Use **PowerShell** for everything (e.g. `Test-NetConnection` over `ping`).
          - Exception: Use `cmdkey` for credential manager tasks.
          - Exception: Use `icacls` for permissions if `Get-Acl` is too complex.
+         - **Mandatory Flow:**
+         - Validation -> Immediate Fix -> Prevention -> Escalation.
 
     LOG DATA:
     {sanitized_snippet}
