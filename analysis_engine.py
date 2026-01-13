@@ -43,33 +43,24 @@ def extract_errors(log_content):
     lines = log_content.split('\n')
     relevant_lines = []
     
-    # 1. Keep a running buffer of the last 3 lines (Pre-Context)
-    # This helps catch "Disk Full" or "Network Timeout" events that occur 
-    # immediately *before* the actual [ERROR] tag.
+    # Keep context buffer
     line_buffer = deque(maxlen=3) 
     
     count = 0
     for line in lines:
         if any(keyword in line for keyword in ["ERROR", "Reason:", "Status:"]):
-            # Add the context (lines leading up to the error)
             relevant_lines.extend(list(line_buffer))
-            # Add the error line itself
             relevant_lines.append(line.strip())
-            # Add a visual separator for the AI
             relevant_lines.append("---")
-            
             count += 1
             if count >= 40: 
                 relevant_lines.append("... [Truncated] ...")
                 break
-        
-        # Update buffer
         line_buffer.append(line.strip())
             
     if not relevant_lines:
         relevant_lines = ["--- No explicit ERROR tags found. Showing last 20 lines ---"] + lines[-20:]
     
-    # Deduplicate lines while preserving order
     seen = set()
     final_lines = []
     for line in relevant_lines:
@@ -102,7 +93,7 @@ def analyze_with_ai(sanitized_snippet):
 
     prompt = f"""
     You are a Senior FSLogix Escalation Engineer.
-    Analyze the log snippet below.
+    Analyze the log snippet below and provide a technical root cause and remediation plan.
 
     **Output Structure (Strict Order):**
 
@@ -113,20 +104,27 @@ def analyze_with_ai(sanitized_snippet):
     2. **ERROR CODE TABLE** (Markdown Table):
        - Summarize unique error codes.
        - Columns: [Code, Meaning, Context, Documentation]
-       - **Documentation Strategy (CRITICAL):**
-         - If the code is a standard Windows Error (e.g., 0x5, 0x20, 0x32, 0x00000002), YOU MUST link to: `https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes`
-         - If the code is FSLogix specific (e.g., FrxStatus), link to: `https://learn.microsoft.com/en-us/fslogix/troubleshooting-error-codes`
-         - Only if no direct link applies, use a Google Search: `https://www.google.com/search?q=fslogix+error+[CODE]+[CONTEXT]`
+       - **Documentation Strategy:**
+         - Windows Errors (0x...): `https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes`
+         - FSLogix Errors: `https://learn.microsoft.com/en-us/fslogix/troubleshooting-known-issues`
+         - Fallback: Google Search link.
 
     3. **Separator:**
        - IMMEDIATELY AFTER the error table, print exactly: |||SPLIT|||
 
     4. **TROUBLESHOOTING TABLE** (Markdown Table Only):
-       - **CRITICAL INSTRUCTION:** Do NOT print a text title.
-       - **Start IMMEDIATELY** with the Markdown table headers.
-       - **Columns:** [Step, Phase, Action, Command/Detail]
-       - **Mandatory Flow:**
-         - Validation -> Immediate Fix -> Prevention -> Escalation.
+       - **CRITICAL INSTRUCTION:** Do NOT print a text title. Start immediately with the table.
+       - **Columns:** [Phase, Action, Command / Specific Detail]
+       - **Formatting Rules:**
+         - Do NOT use backticks (`) or code blocks inside the table cells. Write raw text only.
+         - Do NOT add prefixes like "Storage Key:" or "Command:". Just write the command.
+       - **Constraint 1 (PowerShell Logic):**
+         - If Action is "Remove", Command MUST be `Remove-Item` or `Remove-SmbMapping` (Not `Get`).
+         - If Action is "Check", Command MUST be `Get-Item` or `Test-NetConnection`.
+       - **Constraint 2 (Preference):**
+         - Use **PowerShell** for everything (e.g. `Test-NetConnection` over `ping`).
+         - Exception: Use `cmdkey` for credential manager tasks.
+         - Exception: Use `icacls` for permissions if `Get-Acl` is too complex.
 
     LOG DATA:
     {sanitized_snippet}
@@ -141,19 +139,13 @@ def analyze_with_ai(sanitized_snippet):
     except Exception as e:
         return f"Error: {str(e)}", None
 
-# --- NEW: Q&A Function ---
 def ask_log_question(snippet, question):
-    """
-    Allows the user to ask specific follow-up questions about the log.
-    """
     prompt = f"""
     You are an FSLogix Log Assistant.
     Context (Log Snippet):
     {snippet}
-    
     User Question: "{question}"
-    
-    Answer concisely based ONLY on the log data provided. If the log doesn't show the answer, say "Not found in log snippet."
+    Answer concisely based ONLY on the log data provided.
     """
     try:
         response = client.chat.completions.create(
