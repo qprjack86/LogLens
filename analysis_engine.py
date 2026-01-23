@@ -42,8 +42,6 @@ def extract_performance_metrics(log_content):
 def extract_errors(log_content):
     lines = log_content.split('\n')
     relevant_lines = []
-    
-    # Keep context buffer
     line_buffer = deque(maxlen=3) 
     
     count = 0
@@ -92,41 +90,41 @@ def analyze_with_ai(sanitized_snippet):
         return "ERROR_EMPTY", None
 
     prompt = f"""
-    You are a Senior FSLogix Escalation Engineer.
-    Analyze the log snippet below and provide a technical root cause and remediation plan.
+    You are a Tier 3 FSLogix Escalation Engineer. Your goal is to provide a forensic analysis of the log failure.
+
+    **Instructions:**
+    1. **Be Forensic:** Do not guess. If the log says "Access Denied", do not suggest checking the network unless the error code implies a network timeout.
+    2. **Identify Variables:** First, identify the User, the specific VHD path, and the File Server involved.
+    3. **PowerShell First:** Remediation commands must be PowerShell.
 
     **Output Structure (Strict Order):**
 
-    1. **ROOT CAUSE EXECUTIVE SUMMARY** (Text Only):
-       - Start with a header: `### 🎯 Root Cause: [Short Reason]`
-       - Write 2-3 sentences explaining exactly *why* this happened.
+    **Part 1: Analysis**
+    - Start immediately with a header: `### 🎯 Incident Summary`
+    - **Variables:** Identify the User (SID/Name) and File Server/Path.
+    - **The Smoking Gun:** Quote the EXACT log line (with timestamp) that proves the failure.
+    - **Explanation:** In technical terms, explain the mechanism of failure.
 
-    2. **ERROR CODE TABLE** (Markdown Table):
-       - Summarize unique error codes.
-       - Columns: [Code, Meaning, Context, Documentation]
-       - **Documentation Strategy:**
-         - Windows Errors (0x...): `https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes`
-         - FSLogix Errors: `https://learn.microsoft.com/en-us/fslogix/troubleshooting-known-issues`
-         - Fallback: Google Search link.
+    **Part 2: Error Table**
+    - Output the Markdown Table of errors (Code, Meaning, Documentation).
+    - **Docs:** Link to official MS Learn pages.
 
-    3. **Separator:**
-       - IMMEDIATELY AFTER the error table, print exactly: |||SPLIT|||
+    **Part 3: Separator**
+    - Print exactly: |||SPLIT|||
 
-    4. **TROUBLESHOOTING TABLE** (Markdown Table Only):
-       - **CRITICAL INSTRUCTION:** Do NOT print a text title. Start immediately with the table.
-       - **Columns:** [Phase, Action, Command / Specific Detail]
-       - **Formatting Rules:**
-         - Do NOT use backticks (`) or code blocks inside the table cells. Write raw text only.
-         - Do NOT add prefixes like "Storage Key:" or "Command:". Just write the command.
-       - **Constraint 1 (PowerShell Logic):**
-         - If Action is "Remove", Command MUST be `Remove-Item` or `Remove-SmbMapping` (Not `Get`).
-         - If Action is "Check", Command MUST be `Get-Item` or `Test-NetConnection`.
-       - **Constraint 2 (Preference):**
-         - Use **PowerShell** for everything (e.g. `Test-NetConnection` over `ping`).
-         - Exception: Use `cmdkey` for credential manager tasks.
-         - Exception: Use `icacls` for permissions if `Get-Acl` is too complex.
-         - **Mandatory Flow:**
-         - Validation -> Immediate Fix -> Prevention -> Escalation.
+    **Part 4: Remediation**
+    - **CRITICAL:** Do NOT print the text "Remediation Plan" or any header. The UI handles this.
+    - **Start immediately** with the Markdown Table columns: `| Phase | Action | Command |`
+    - **Style Rules:**
+         - NO backticks or code blocks inside the table cells.
+         - NO prefixes (e.g., remove "Command: ").
+    - **Logic:**
+         - **Validation:** Proof commands (e.g. `Test-Path`).
+         - **Fix:** Resolution commands (e.g. `New-ItemProperty`).
+         - **Prevention:** Long-term fixes.
+
+    **Part 5: Stop**
+    - **CRITICAL:** Do NOT offer "Next Steps", "If you want...", or any closing pleasantries. End the response immediately after the table.
 
     LOG DATA:
     {sanitized_snippet}
@@ -135,7 +133,7 @@ def analyze_with_ai(sanitized_snippet):
         response = client.chat.completions.create(
             model=DEPLOYMENT_NAME,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=4000 
+            max_completion_tokens=4000
         )
         return response.choices[0].message.content, response.usage
     except Exception as e:

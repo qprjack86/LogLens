@@ -99,8 +99,9 @@ if uploaded_files:
                 
                 st.divider()
                 
-                # Part 2: Troubleshooting (FULL WIDTH)
-                st.subheader("🛠️ Suggested Troubleshooting Plan")
+                # Part 2: Remediation Plan (FULL WIDTH)
+                # Removed the manual "Suggested Troubleshooting Plan" header
+                st.subheader("🛠️ Remediation Plan") 
                 st.markdown(part2)
             else:
                 st.warning("Raw Output:")
@@ -119,7 +120,7 @@ if uploaded_files:
                     st.toast(f"Feedback Saved: {sentiment_text}")
             
             with c_dl:
-                st.download_button("📥 Download Report", raw_response.replace("|||SPLIT|||", "\n\n## Troubleshooting\n"), "fslogix_report.md")
+                st.download_button("📥 Download Report", raw_response.replace("|||SPLIT|||", "\n\n## Remediation Plan\n"), "fslogix_report.md")
 
             st.divider()
 
