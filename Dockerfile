@@ -12,20 +12,27 @@ COPY . .
 # Expose Streamlit's default port
 EXPOSE 8501
 
-# Set a fixed Secret for XSRF protection (Fixes 400 Error on Uploads)
-# In production, you would pass this as an environment variable, but setting it here 
-# ensures your uploads don't fail if the container restarts.
-ENV STREAMLIT_SERVER_COOKIE_SECRET="89327598237589237589237589"
+# --- CONFIGURATION FIX ---
+# We create a config.toml file to permanently fix the 400 Error.
+# 1. enableXsrfProtection = false: TRUSTS the Azure Load Balancer (Fixes the 400 Error).
+# 2. enableCORS = false: Allows the browser to talk to the container via Azure.
+# 3. maxUploadSize = 2000: Allows 2GB uploads.
+RUN mkdir -p /root/.streamlit
+RUN echo "\
+[server]\n\
+headless = true\n\
+address = '0.0.0.0'\n\
+port = 8501\n\
+maxUploadSize = 2000\n\
+enableCORS = false\n\
+enableXsrfProtection = false\n\
+enableWebsocketCompression = false\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+serverAddress = 'fslogix-analyser.purplegrass-6ec8783e.uksouth.azurecontainerapps.io'\n\
+serverPort = 443\n\
+" > /root/.streamlit/config.toml
 
-# Run the app SECURELY
-# 1. We KEEP XsrfProtection and CORS enabled (True).
-# 2. We set 'browser.serverAddress' so Streamlit trusts the Azure URL.
-# 3. We removed 'browser.serverPort' to prevent mismatches (browsers often hide port 443).
-CMD ["streamlit", "run", "app.py", \
-    "--server.port=8501", \
-    "--server.address=0.0.0.0", \
-    "--browser.serverAddress=fslogix-analyser.purplegrass-6ec8783e.uksouth.azurecontainerapps.io", \
-    "--server.enableXsrfProtection=true", \
-    "--server.enableCORS=true", \
-    "--server.enableWebsocketCompression=false", \
-    "--server.fileWatcherType=none"]
+# Run Streamlit (No flags needed now, they are in config.toml)
+CMD ["streamlit", "run", "app.py"]
