@@ -39,6 +39,7 @@ MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024  # 20MB per file
 
 # In-memory state by browser session id. Keeps large snippets out of cookies.
 APP_STATE = {}
+LOG_TYPE_PRIORITY = {"GENERIC": 0, "INTUNE": 1, "FSLOGIX": 2}
 
 
 def get_state():
@@ -97,6 +98,14 @@ def parse_uploads(uploaded_files):
     file_names = [f.filename for f in uploaded_files if f and f.filename]
     detected_log_type = "GENERIC"
 
+    def update_detected_type(current_type, candidate_type):
+        """Preserve the most specific detected log type across all uploads."""
+        return (
+            candidate_type
+            if LOG_TYPE_PRIORITY.get(candidate_type, 0) > LOG_TYPE_PRIORITY.get(current_type, 0)
+            else current_type
+        )
+
     for uploaded_file in uploaded_files:
         if not uploaded_file or not uploaded_file.filename:
             continue
@@ -108,7 +117,8 @@ def parse_uploads(uploaded_files):
             try:
                 with zipfile.ZipFile(uploaded_file.stream) as zip_handle:
                     all_files = zip_handle.namelist()
-                    detected_log_type = detect_log_type(uploaded_file.filename, file_list=all_files)
+                    zip_detected = detect_log_type(uploaded_file.filename, file_list=all_files)
+                    detected_log_type = update_detected_type(detected_log_type, zip_detected)
 
                     target_patterns = LOG_PROFILES[detected_log_type]["priority_files"]
                     chosen_file = None
@@ -119,7 +129,10 @@ def parse_uploads(uploaded_files):
                             if fnmatch.fnmatch(file_name.lower(), pattern.lower())
                         ]
                         if matches:
-                            chosen_file = matches[0]
+                            chosen_file = max(
+                                matches,
+                                key=lambda file_name: zip_handle.getinfo(file_name).file_size,
+                            )
                             break
 
                     if not chosen_file:
@@ -145,8 +158,7 @@ def parse_uploads(uploaded_files):
             combined_log_text += f"\n\n--- FILE: {uploaded_file.filename} ---\n"
             file_text = decode_file(uploaded_file.stream.read())
             file_detected = detect_log_type(uploaded_file.filename, content=file_text)
-            if file_detected != "GENERIC":
-                detected_log_type = file_detected
+            detected_log_type = update_detected_type(detected_log_type, file_detected)
 
         if file_text:
             combined_log_text += file_text
