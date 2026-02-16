@@ -26,17 +26,6 @@ def _missing_openai_config():
         missing.append("OPENAI_MODEL (or LLM_MODEL)")
     return missing
 
-def get_missing_config(provider=None):
-    provider = (provider or "").lower()
-    if provider == "azure":
-        return _missing(AZURE_REQUIRED_ENV_VARS)
-    if provider in {"openai", "openai_compatible"}:
-        return _missing_openai_config()
-    return {
-        "azure": _missing(AZURE_REQUIRED_ENV_VARS),
-        "openai": _missing_openai_config(),
-    }
-
 def _select_provider():
     explicit = os.environ.get("LLM_PROVIDER", "").strip().lower()
     if explicit in {"azure", "openai", "openai_compatible"}:
@@ -47,6 +36,31 @@ def _select_provider():
     if not _missing_openai_config():
         return "openai"
     return "unconfigured"
+
+def get_missing_config(provider=None):
+    # 1. Auto-detect provider if not explicitly passed
+    if not provider:
+        provider = _select_provider()
+
+    provider = (provider or "").lower()
+    
+    # 2. Prepare the result dictionary (Default to empty lists = No errors)
+    res = {
+        "azure": [],
+        "openai": []
+    }
+    
+    # 3. Only check the relevant config for the ACTIVE provider
+    if provider == "azure":
+        res["azure"] = _missing(AZURE_REQUIRED_ENV_VARS)
+    elif provider in {"openai", "openai_compatible"}:
+        res["openai"] = _missing_openai_config()
+    else:
+        # If unconfigured, show everything that is missing so user can decide
+        res["azure"] = _missing(AZURE_REQUIRED_ENV_VARS)
+        res["openai"] = _missing_openai_config()
+        
+    return res
 
 def get_client_and_deployment():
     """Return (client, model_or_deployment_name, error_message)."""
