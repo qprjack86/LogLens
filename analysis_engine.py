@@ -137,38 +137,35 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
 
     profile = LOG_PROFILES[log_type]
 
+    # UPDATED PROMPT: More aggressive about the separator and formatting
     prompt = f"""
-    You are a {profile['role']}. Your goal is to provide a forensic analysis of the log failure.
+    You are a {profile['role']}. Provide a forensic analysis of the log failure.
     **Context:** {profile['context_hint']}
 
     **Instructions:**
-    1. **Be Forensic:** Do not guess. Quote specific error codes, exit codes, or failure reasons.
-    2. **Identify Variables:** Identify the App Name, Script Path, or User involved.
+    1. **Be Forensic:** Quote specific error codes, exit codes, or failure reasons.
+    2. **Identify Variables:** Identify the App Name, Script Path, or User.
     3. **PowerShell First:** Remediation commands must be PowerShell.
 
-    **Output Structure (Strict Order):**
+    **Output Structure (Strictly follow this):**
 
     **Part 1: Analysis**
-    - Start immediately with a header: `### 🎯 Incident Summary`
-    - **Scope:** Identify the Log Type detected ({log_type}).
-    - **The Smoking Gun:** Quote the EXACT log line (with timestamp) that proves the failure.
-    - **Explanation:** In technical terms, explain the mechanism of failure.
+    - Header: `### 🎯 Incident Summary`
+    - **Scope:** Log Type ({log_type}).
+    - **The Smoking Gun:** The exact log line proving failure.
+    - **Explanation:** Technical explanation of the failure.
 
     **Part 2: Error Table**
-    - Output the Markdown Table of errors (Code, Meaning, Documentation).
-    - **Docs:** Link to official MS Learn pages. Primary Link: {profile['docs_link']}
+    - Markdown Table of errors (Code, Meaning, Docs Link).
+    - Primary Link: {profile['docs_link']}
 
-    **Part 3: Separator**
-    - Print exactly: |||SPLIT|||
+    **Part 3: The Split (CRITICAL)**
+    - YOU MUST PRINT EXACTLY THIS LINE ALONE:
+    |||SPLIT|||
 
     **Part 4: Remediation**
-    - **CRITICAL:** Do NOT print the text "Remediation Plan".
-    - **Start immediately** with the Markdown Table: `| Phase | Action | Command |`
-    - **Style Rules:** NO backticks or code blocks inside table cells. NO prefixes.
-    - **Logic:** Validation -> Fix -> Prevention.
-
-    **Part 5: Stop**
-    - End the response immediately after the table.
+    - Start immediately with a Markdown Table: `| Phase | Action | Command |`
+    - Logic: Validation -> Fix -> Prevention.
 
     LOG DATA:
     {sanitized_snippet}
@@ -177,17 +174,16 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=4000,
+            # UPDATED: Increased to 16000 to prevent cut-off for reasoning models
+            max_tokens=16000,
         )
         return response.choices[0].message.content, response.usage
     except Exception as exc:
         message = str(exc)
         if "404" in message and "Resource not found" in message:
             return (
-                "Error: Resource not found from model backend. "
-                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
-                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
-                f"Current model/deployment value: {deployment_name}"
+                "Error: Resource not found. Verify OPENAI_BASE_URL and OPENAI_MODEL. "
+                f"Current model: {deployment_name}"
             ), None
         return f"Error: {message}", None
 
@@ -201,18 +197,16 @@ def ask_log_question(snippet, question):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            # UPDATED: Increased from 500 to 2000 to allow Kimi enough tokens to "think"
-            max_tokens=2000,
+            # UPDATED: Increased to 4000 for Q&A reasoning
+            max_tokens=4000,
         )
         return response.choices[0].message.content
     except Exception as exc:
         message = str(exc)
         if "404" in message and "Resource not found" in message:
             return (
-                "Error: Resource not found from model backend. "
-                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
-                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
-                f"Current model/deployment value: {deployment_name}"
+                "Error: Resource not found. Verify OPENAI_BASE_URL and OPENAI_MODEL. "
+                f"Current model: {deployment_name}"
             )
         return f"Error: {message}"
 

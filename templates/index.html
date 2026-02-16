@@ -5,8 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LogLens AI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <script>
+    function showLoading() {
+      const loader = document.getElementById('loading-overlay');
+      if (loader) loader.style.display = 'flex';
+    }
+  </script>
 </head>
 <body>
+  <div id="loading-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(14, 17, 23, 0.9); z-index:9999; flex-direction:column; align-items:center; justify-content:center;">
+    <div class="spinner"></div>
+    <h2 style="margin-top:20px; color:#3b82f6;">Analyzing Logs...</h2>
+    <p class="muted">Kimi AI is reasoning over the data. This may take 30-60 seconds.</p>
+  </div>
+
   <div class="layout">
     <aside class="sidebar">
       <h2>LogLens 🔍</h2>
@@ -14,7 +26,7 @@
       {% for item in state.report_history|reverse %}
       <details>
         <summary>{{ item.timestamp }} - {{ item.files[:20] }}...</summary>
-        <pre>{{ item.result.split('|||SPLIT|||')[0] }}</pre>
+        <pre>{{ (item.result or 'No result').split('|||SPLIT|||')[0] }}</pre>
       </details>
       {% else %}
       <p class="muted">No previous reports.</p>
@@ -29,21 +41,12 @@
       {% if has_missing_config %}
       <div class="alert error">
         <strong>Model backend configuration is incomplete.</strong><br />
-        
         {% if missing_config.azure is defined and missing_config.azure %}
           Missing Azure vars: {{ ", ".join(missing_config.azure) }}<br />
         {% endif %}
-        
         {% if missing_config.openai is defined and missing_config.openai %}
           Missing OpenAI-compatible vars: {{ ", ".join(missing_config.openai) }}<br />
         {% endif %}
-        
-        <br />
-        <strong>Azure Example:</strong><br />
-        <code>docker run -p 8501:8501 -e AZURE_OPENAI_API_KEY=... -e AZURE_OPENAI_API_VERSION=... -e AZURE_OPENAI_ENDPOINT=... -e AZURE_OPENAI_DEPLOYMENT_NAME=... loglens-local</code><br />
-        <br />
-        <strong>OpenAI/Kimi Example:</strong><br />
-        <code>docker run -p 8501:8501 -e LLM_PROVIDER=openai -e OPENAI_API_KEY=... -e OPENAI_MODEL=kimi-2.5 -e OPENAI_BASE_URL=... loglens-local</code>
       </div>
       {% endif %}
 
@@ -57,7 +60,7 @@
         {% endif %}
       {% endwith %}
 
-      <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data" class="panel">
+      <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data" class="panel" onsubmit="showLoading()">
         <div class="two-col">
           <div>
             <h3>⚙️ Settings</h3>
@@ -117,7 +120,7 @@
           <div class="chat user"><strong>You:</strong> {{ q }}</div>
           <div class="chat ai"><strong>LogLens:</strong> {{ a }}</div>
         {% endfor %}
-        <form action="{{ url_for('ask') }}" method="post" class="inline-form">
+        <form action="{{ url_for('ask') }}" method="post" class="inline-form" onsubmit="showLoading()">
           <input type="text" name="question" placeholder="Ask a question about this log..." required />
           <button type="submit">Ask</button>
         </form>

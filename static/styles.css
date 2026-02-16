@@ -99,3 +99,17 @@ pre { white-space: pre-wrap; background:#0f141d; border:1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9rem;
 }
+/* LOADING SPINNER */
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid #293141;
+  border-top: 5px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
