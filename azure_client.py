@@ -19,15 +19,32 @@ def _missing(required_names):
     return [name for name in required_names if not os.environ.get(name)]
 
 
+def _env_any(*names):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
+def _missing_openai_config():
+    missing = []
+    if not os.environ.get("OPENAI_API_KEY"):
+        missing.append("OPENAI_API_KEY")
+    if not _env_any("OPENAI_MODEL", "LLM_MODEL"):
+        missing.append("OPENAI_MODEL (or LLM_MODEL)")
+    return missing
+
+
 def get_missing_config(provider=None):
     provider = (provider or "").lower()
     if provider == "azure":
         return _missing(AZURE_REQUIRED_ENV_VARS)
     if provider in {"openai", "openai_compatible"}:
-        return _missing(OPENAI_REQUIRED_ENV_VARS)
+        return _missing_openai_config()
     return {
         "azure": _missing(AZURE_REQUIRED_ENV_VARS),
-        "openai": _missing(OPENAI_REQUIRED_ENV_VARS),
+        "openai": _missing_openai_config(),
     }
 
 
@@ -38,7 +55,7 @@ def _select_provider():
 
     if not _missing(AZURE_REQUIRED_ENV_VARS):
         return "azure"
-    if not _missing(OPENAI_REQUIRED_ENV_VARS):
+    if not _missing_openai_config():
         return "openai"
     return "unconfigured"
 
@@ -64,23 +81,23 @@ def get_client_and_deployment():
             return None, None, f"Azure client initialization error: {exc}"
 
     if provider in {"openai", "openai_compatible"}:
-        missing = _missing(OPENAI_REQUIRED_ENV_VARS)
+        missing = _missing_openai_config()
         if missing:
             return None, None, f"Missing OpenAI-compatible configuration: {', '.join(missing)}"
 
-        base_url = os.environ.get("OPENAI_BASE_URL")
+        base_url = _env_any("OPENAI_BASE_URL", "OPENAI_API_BASE")
         try:
             kwargs = {"api_key": os.environ.get("OPENAI_API_KEY")}
             if base_url:
                 kwargs["base_url"] = base_url
             client = OpenAI(**kwargs)
-            model_name = os.environ.get("OPENAI_MODEL")
+            model_name = _env_any("OPENAI_MODEL", "LLM_MODEL")
             return client, model_name, None
         except Exception as exc:
             return None, None, f"OpenAI-compatible client initialization error: {exc}"
 
     azure_missing = ", ".join(_missing(AZURE_REQUIRED_ENV_VARS))
-    openai_missing = ", ".join(_missing(OPENAI_REQUIRED_ENV_VARS))
+    openai_missing = ", ".join(_missing_openai_config())
     return (
         None,
         None,

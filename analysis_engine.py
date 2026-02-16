@@ -143,8 +143,8 @@ def _backend_unavailable_message(error_message):
         "- AZURE_OPENAI_DEPLOYMENT_NAME\n"
         "\nOpenAI-compatible (e.g., kimi):\n"
         "- OPENAI_API_KEY\n"
-        "- OPENAI_MODEL\n"
-        "- OPENAI_BASE_URL (optional if using non-default endpoint)\n"
+        "- OPENAI_MODEL (or LLM_MODEL)\n"
+        "- OPENAI_BASE_URL or OPENAI_API_BASE (for non-default endpoint)\n"
         "- LLM_PROVIDER=openai (optional, forces provider selection)"
     )
 
@@ -207,7 +207,8 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
         if "404" in message and "Resource not found" in message:
             return (
                 "Error: Resource not found from model backend. "
-                "Check your deployment/model name and endpoint settings. "
+                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
+                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
                 f"Current model/deployment value: {deployment_name}"
             ), None
         return f"Error: {message}", None
@@ -231,7 +232,8 @@ def ask_log_question(snippet, question):
         if "404" in message and "Resource not found" in message:
             return (
                 "Error: Resource not found from model backend. "
-                "Check your deployment/model name and endpoint settings. "
+                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
+                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
                 f"Current model/deployment value: {deployment_name}"
             )
         return f"Error: {message}"
