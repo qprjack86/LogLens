@@ -200,6 +200,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
         return f"Error: {str(exc)}", None
 
 
+
 def ask_log_question(snippet, question):
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
@@ -215,6 +216,7 @@ def ask_log_question(snippet, question):
         return response.choices[0].message.content
     except Exception as exc:
         return f"Error: {str(exc)}"
+
 
 
 def extract_performance_metrics(log_content):
