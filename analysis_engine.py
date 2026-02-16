@@ -201,7 +201,8 @@ def ask_log_question(snippet, question):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
+            # UPDATED: Increased from 500 to 2000 to allow Kimi enough tokens to "think"
+            max_tokens=2000,
         )
         return response.choices[0].message.content
     except Exception as exc:
