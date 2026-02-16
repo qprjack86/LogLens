@@ -8,6 +8,7 @@ from flask import Flask, flash, redirect, render_template, request, send_file, s
 from markupsafe import Markup
 import markdown
 
+from azure_client import get_missing_config
 from analysis_engine import (
     LOG_PROFILES,
     analyze_with_ai,
@@ -116,9 +117,12 @@ def index():
         else:
             analysis_part1 = analysis
 
+    missing_config = get_missing_config()
+
     return render_template(
         "index.html",
         state=state,
+        missing_config=missing_config,
         analysis_part1=render_markdown(analysis_part1) if analysis_part1 else None,
         analysis_part2=render_markdown(analysis_part2) if analysis_part2 else None,
     )

@@ -3,7 +3,7 @@ import csv
 import os
 from datetime import datetime
 from collections import deque
-from azure_client import client, DEPLOYMENT_NAME
+from azure_client import get_client_and_deployment
 
 # --- CONFIGURATION: LOG PROFILES ---
 LOG_PROFILES = {
@@ -116,8 +116,8 @@ def extract_errors(log_content, log_type="GENERIC"):
 
 def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
     file_exists = os.path.isfile("feedback_log.csv")
-    with open("feedback_log.csv", mode="a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+    with open("feedback_log.csv", mode="a", newline="", encoding="utf-8") as file_handle:
+        writer = csv.writer(file_handle)
         if not file_exists:
             writer.writerow(["Timestamp", "Sentiment", "Feedback", "Snippet", "AI_Response"])
         writer.writerow(
@@ -131,9 +131,25 @@ def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
         )
 
 
+def _azure_unavailable_message(error_message):
+    return (
+        "### Azure Configuration Error\n"
+        f"{error_message}\n\n"
+        "Set the required environment variables and retry:\n"
+        "- AZURE_OPENAI_API_KEY\n"
+        "- AZURE_OPENAI_API_VERSION\n"
+        "- AZURE_OPENAI_ENDPOINT\n"
+        "- AZURE_OPENAI_DEPLOYMENT_NAME"
+    )
+
+
 def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
     if not sanitized_snippet or len(sanitized_snippet) < 5:
         return "ERROR_EMPTY", None
+
+    client, deployment_name, error_message = get_client_and_deployment()
+    if error_message:
+        return _azure_unavailable_message(error_message), None
 
     profile = LOG_PROFILES[log_type]
 
@@ -175,26 +191,32 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
     """
     try:
         response = client.chat.completions.create(
-            model=DEPLOYMENT_NAME,
+            model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
             max_completion_tokens=4000,
         )
         return response.choices[0].message.content, response.usage
-    except Exception as e:
-        return f"Error: {str(e)}", None
+    except Exception as exc:
+        return f"Error: {str(exc)}", None
+
 
 
 def ask_log_question(snippet, question):
+    client, deployment_name, error_message = get_client_and_deployment()
+    if error_message:
+        return _azure_unavailable_message(error_message)
+
     prompt = f"You are a Log Assistant. Context:\n{snippet}\nQuestion: {question}\nAnswer concisely."
     try:
         response = client.chat.completions.create(
-            model=DEPLOYMENT_NAME,
+            model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
             max_completion_tokens=500,
         )
         return response.choices[0].message.content
-    except Exception as e:
-        return f"Error: {str(e)}"
+    except Exception as exc:
+        return f"Error: {str(exc)}"
+
 
 
 def extract_performance_metrics(log_content):

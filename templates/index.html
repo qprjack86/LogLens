@@ -25,6 +25,13 @@
       <h1>🔍 LogLens AI</h1>
       <p>Forensic analysis for <strong>FSLogix</strong>, <strong>Intune</strong>, and <strong>System</strong> logs.</p>
 
+      {% if missing_config %}
+      <div class="alert error">
+        Azure is not configured. Set: {{ ", ".join(missing_config) }}<br />
+        Example: <code>docker run -p 8501:8501 -e AZURE_OPENAI_API_KEY=... -e AZURE_OPENAI_API_VERSION=... -e AZURE_OPENAI_ENDPOINT=... -e AZURE_OPENAI_DEPLOYMENT_NAME=... loglens-local</code>
+      </div>
+      {% endif %}
+
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <div class="alerts">
