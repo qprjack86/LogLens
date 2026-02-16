@@ -131,6 +131,21 @@ def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
         )
 
 
+def _backend_unavailable_message(error_message):
+    return (
+        "### Model Backend Configuration Error\n"
+        f"{error_message}\n\n"
+        "Configure one backend and retry:\n"
+        "\nAzure OpenAI:\n"
+        "- AZURE_OPENAI_API_KEY\n"
+        "- AZURE_OPENAI_API_VERSION\n"
+        "- AZURE_OPENAI_ENDPOINT\n"
+        "- AZURE_OPENAI_DEPLOYMENT_NAME\n"
+        "\nOpenAI-compatible (e.g., kimi):\n"
+        "- OPENAI_API_KEY\n"
+        "- OPENAI_MODEL (or LLM_MODEL)\n"
+        "- OPENAI_BASE_URL or OPENAI_API_BASE (for non-default endpoint)\n"
+        "- LLM_PROVIDER=openai (optional, forces provider selection)"
 def _azure_unavailable_message(error_message):
     return (
         "### Azure Configuration Error\n"
@@ -149,6 +164,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
 
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
+        return _backend_unavailable_message(error_message), None
         return _azure_unavailable_message(error_message), None
 
     profile = LOG_PROFILES[log_type]
@@ -193,6 +209,19 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=4000,
+        )
+        return response.choices[0].message.content, response.usage
+    except Exception as exc:
+        message = str(exc)
+        if "404" in message and "Resource not found" in message:
+            return (
+                "Error: Resource not found from model backend. "
+                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
+                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
+                f"Current model/deployment value: {deployment_name}"
+            ), None
+        return f"Error: {message}", None
             max_completion_tokens=4000,
         )
         return response.choices[0].message.content, response.usage
@@ -203,6 +232,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
 def ask_log_question(snippet, question):
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
+        return _backend_unavailable_message(error_message)
         return _azure_unavailable_message(error_message)
 
     prompt = f"You are a Log Assistant. Context:\n{snippet}\nQuestion: {question}\nAnswer concisely."
@@ -210,6 +240,19 @@ def ask_log_question(snippet, question):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+        )
+        return response.choices[0].message.content
+    except Exception as exc:
+        message = str(exc)
+        if "404" in message and "Resource not found" in message:
+            return (
+                "Error: Resource not found from model backend. "
+                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
+                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
+                f"Current model/deployment value: {deployment_name}"
+            )
+        return f"Error: {message}"
             max_completion_tokens=500,
         )
         return response.choices[0].message.content

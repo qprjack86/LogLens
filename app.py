@@ -263,11 +263,19 @@ def index():
             analysis_part1 = analysis
 
     missing_config = get_missing_config()
+    backend_provider = os.environ.get("LLM_PROVIDER", "auto")
+    has_missing_config = False
+    if isinstance(missing_config, dict):
+        has_missing_config = any(missing_config.get(key) for key in ["azure", "openai"])
+    else:
+        has_missing_config = bool(missing_config)
 
     return render_template(
         "index.html",
         state=state,
         missing_config=missing_config,
+        has_missing_config=has_missing_config,
+        backend_provider=backend_provider,
         analysis_part1=render_markdown(analysis_part1) if analysis_part1 else None,
         analysis_part2=render_markdown(normalize_remediation_markdown(analysis_part2))
         if analysis_part2
