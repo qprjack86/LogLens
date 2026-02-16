@@ -30,7 +30,6 @@ LOG_PROFILES = {
     },
 }
 
-
 def decode_file(bytes_data):
     encodings = ["utf-8", "utf-16-le", "cp1252", "latin-1"]
     for enc in encodings:
@@ -40,36 +39,24 @@ def decode_file(bytes_data):
             continue
     return None
 
-
 def detect_log_type(filename, content=None, file_list=None):
-    """
-    Determines log type based on:
-    1. ZIP Contents (file_list) - MOST ACCURATE for bundles
-    2. Filename
-    3. Content
-    """
     filename = filename.lower()
-
     if file_list:
         files_str = " ".join(file_list).lower()
         if "intunemanagementextension.log" in files_str or "mdmdiagnostics" in files_str:
             return "INTUNE"
         if "profile_" in files_str and ".log" in files_str:
             return "FSLOGIX"
-
     if "profile" in filename or "frx" in filename:
         return "FSLOGIX"
     if "intune" in filename or "ime" in filename:
         return "INTUNE"
-
     if content:
         if "FrxStatus" in content or "FSLogix" in content:
             return "FSLOGIX"
         if "IntuneManagementExtension" in content or "<![LOG[" in content:
             return "INTUNE"
-
     return "GENERIC"
-
 
 def sanitize_log(log_content):
     log_content = re.sub(r"S-1-5-21-\d+-\d+-\d+-\d+", r"[USER_SID]", log_content)
@@ -78,14 +65,11 @@ def sanitize_log(log_content):
     log_content = re.sub(r"\\\\([a-zA-Z0-9\.\-_]+)", r"\\\\[FILE_SERVER]", log_content)
     return log_content
 
-
 def extract_errors(log_content, log_type="GENERIC"):
     lines = log_content.split("\n")
     relevant_lines = []
     line_buffer = deque(maxlen=3)
-
     keywords = LOG_PROFILES[log_type]["keywords"]
-
     count = 0
     for line in lines:
         if any(k.lower() in line.lower() for k in keywords):
@@ -97,22 +81,18 @@ def extract_errors(log_content, log_type="GENERIC"):
                 relevant_lines.append("... [Truncated] ...")
                 break
         line_buffer.append(line.strip())
-
     if not relevant_lines:
         relevant_lines = ["--- No explicit ERROR tags found. Showing last 20 lines ---"] + lines[-20:]
-
     seen = set()
     final_lines = []
     for line in relevant_lines:
         if line not in seen:
             final_lines.append(line)
             seen.add(line)
-
     full_text = "\n".join(final_lines)
     if len(full_text) > 12000:
         return full_text[:12000] + "\n... [Hard truncated]"
     return full_text
-
 
 def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
     file_exists = os.path.isfile("feedback_log.csv")
@@ -130,18 +110,22 @@ def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
             ]
         )
 
-
-def _azure_unavailable_message(error_message):
+def _backend_unavailable_message(error_message):
     return (
-        "### Azure Configuration Error\n"
+        "### Model Backend Configuration Error\n"
         f"{error_message}\n\n"
-        "Set the required environment variables and retry:\n"
+        "Configure one backend and retry:\n"
+        "\nAzure OpenAI:\n"
         "- AZURE_OPENAI_API_KEY\n"
         "- AZURE_OPENAI_API_VERSION\n"
         "- AZURE_OPENAI_ENDPOINT\n"
-        "- AZURE_OPENAI_DEPLOYMENT_NAME"
+        "- AZURE_OPENAI_DEPLOYMENT_NAME\n"
+        "\nOpenAI-compatible (e.g., Kimi):\n"
+        "- OPENAI_API_KEY\n"
+        "- OPENAI_MODEL (or LLM_MODEL)\n"
+        "- OPENAI_BASE_URL or OPENAI_API_BASE (for non-default endpoint)\n"
+        "- LLM_PROVIDER=openai (optional, forces provider selection)"
     )
-
 
 def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
     if not sanitized_snippet or len(sanitized_snippet) < 5:
@@ -149,7 +133,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
 
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
-        return _azure_unavailable_message(error_message), None
+        return _backend_unavailable_message(error_message), None
 
     profile = LOG_PROFILES[log_type]
 
@@ -193,29 +177,43 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=4000,
+            max_tokens=4000,
         )
         return response.choices[0].message.content, response.usage
     except Exception as exc:
-        return f"Error: {str(exc)}", None
-
+        message = str(exc)
+        if "404" in message and "Resource not found" in message:
+            return (
+                "Error: Resource not found from model backend. "
+                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
+                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
+                f"Current model/deployment value: {deployment_name}"
+            ), None
+        return f"Error: {message}", None
 
 def ask_log_question(snippet, question):
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
-        return _azure_unavailable_message(error_message)
+        return _backend_unavailable_message(error_message)
 
     prompt = f"You are a Log Assistant. Context:\n{snippet}\nQuestion: {question}\nAnswer concisely."
     try:
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=500,
+            max_tokens=500,
         )
         return response.choices[0].message.content
     except Exception as exc:
-        return f"Error: {str(exc)}"
-
+        message = str(exc)
+        if "404" in message and "Resource not found" in message:
+            return (
+                "Error: Resource not found from model backend. "
+                "If using Azure, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT_NAME. "
+                "If using OpenAI-compatible, verify OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_MODEL. "
+                f"Current model/deployment value: {deployment_name}"
+            )
+        return f"Error: {message}"
 
 def extract_performance_metrics(log_content):
     metrics = {}
