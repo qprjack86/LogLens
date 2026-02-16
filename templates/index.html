@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LogLens AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>LogLens 🔍</h2>
+      <h3>🕒 Recent Analysis</h3>
+      {% for item in state.report_history|reverse %}
+      <details>
+        <summary>{{ item.timestamp }} - {{ item.files[:20] }}...</summary>
+        <pre>{{ item.result.split('|||SPLIT|||')[0] }}</pre>
+      </details>
+      {% else %}
+      <p class="muted">No previous reports.</p>
+      {% endfor %}
+    </aside>
+
+    <main class="content">
+      <h1>🔍 LogLens AI</h1>
+      <p>Forensic analysis for <strong>FSLogix</strong>, <strong>Intune</strong>, and <strong>System</strong> logs.</p>
+
+      {% if has_missing_config %}
+      <div class="alert error">
+        Model backend configuration is incomplete.<br />
+        {% if missing_config.azure is defined and missing_config.azure %}
+          Missing Azure vars: {{ ", ".join(missing_config.azure) }}<br />
+        {% endif %}
+        {% if missing_config.openai is defined and missing_config.openai %}
+          Missing OpenAI-compatible vars: {{ ", ".join(missing_config.openai) }}<br />
+        {% endif %}
+        Azure example: <code>docker run -p 8501:8501 -e AZURE_OPENAI_API_KEY=... -e AZURE_OPENAI_API_VERSION=... -e AZURE_OPENAI_ENDPOINT=... -e AZURE_OPENAI_DEPLOYMENT_NAME=... loglens-local</code><br />
+        OpenAI-compatible example: <code>docker run -p 8501:8501 -e LLM_PROVIDER=openai -e OPENAI_API_KEY=... -e OPENAI_MODEL=kimi-2.5 -e OPENAI_BASE_URL=... loglens-local</code>
+      </div>
+      {% endif %}
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="alerts">
+            {% for category, message in messages %}
+              <div class="alert {{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data" class="panel">
+        <div class="two-col">
+          <div>
+            <h3>⚙️ Settings</h3>
+            <label><input type="checkbox" name="sanitize" /> Strip PII (Usernames/SIDs)</label>
+          </div>
+          <div>
+            <h3>Upload Logs (ZIPs supported)</h3>
+            <input type="file" name="log_files" accept=".log,.zip,.txt" multiple required />
+          </div>
+        </div>
+        <button type="submit" class="primary">Run Analysis</button>
+      </form>
+
+      {% if state.detected_log_type %}
+        <div class="badge">Detected: {{ state.detected_log_type }}</div>
+      {% endif %}
+
+      {% if state.metrics %}
+      <section class="panel">
+        <h3>⏱️ Session Health</h3>
+        <div class="metric-grid">
+          <div class="metric"><span>Profile Load</span><strong>{{ state.metrics.get('Load Profile Time') }}</strong></div>
+          <div class="metric"><span>VHD Mount</span><strong>{{ state.metrics.get('VHD Mount Time') }}</strong></div>
+          <div class="metric"><span>Critical Errors</span><strong>{{ state.metrics.get('Total Errors') }}</strong></div>
+        </div>
+      </section>
+      {% endif %}
+
+      {% if state.snippet %}
+      <details class="panel">
+        <summary>📂 View Extracted Snippet ({{ state.detected_log_type }} Filter)</summary>
+        <pre>{{ state.snippet }}</pre>
+      </details>
+      {% endif %}
+
+      {% if analysis_part1 %}
+      <section class="panel markdown">{{ analysis_part1 }}</section>
+      {% if analysis_part2 %}
+      <section class="panel markdown">
+        <h3>🛠️ Remediation Plan</h3>
+        {{ analysis_part2 }}
+      </section>
+      {% endif %}
+
+      <section class="panel">
+        <h3>📢 Rate Analysis</h3>
+        <form action="{{ url_for('feedback') }}" method="post" class="inline-form">
+          <button type="submit" name="sentiment" value="positive">👍</button>
+          <button type="submit" name="sentiment" value="negative">👎</button>
+          <a class="button" href="{{ url_for('download_report') }}">📥 Download Report</a>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h3>💬 Ask LogLens</h3>
+        {% for q, a in state.qa_history %}
+          <div class="chat user"><strong>You:</strong> {{ q }}</div>
+          <div class="chat ai"><strong>LogLens:</strong> {{ a }}</div>
+        {% endfor %}
+        <form action="{{ url_for('ask') }}" method="post" class="inline-form">
+          <input type="text" name="question" placeholder="Ask a question about this log..." required />
+          <button type="submit">Ask</button>
+        </form>
+      </section>
+      {% endif %}
+    </main>
+  </div>
+</body>
+</html>

@@ -1,2 +1,4 @@
-streamlit>=1.37.0
+flask>=3.0.0
 openai
+markdown>=3.6
+bleach>=6.1.0
