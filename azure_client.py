@@ -1,25 +1,33 @@
 import os
-import streamlit as st
 from openai import AzureOpenAI
 
-def get_secret(key):
-    """
-    Retrieves secret from Environment Variables (Cloud) or Streamlit Secrets (Local).
-    """
-    value = os.environ.get(key)
-    if value: return value
-    try: return st.secrets[key]
-    except: return None
 
-# Initialize the Client
-try:
-    client = AzureOpenAI(
-        api_key=get_secret("AZURE_OPENAI_API_KEY"),
-        api_version=get_secret("AZURE_OPENAI_API_VERSION"),
-        azure_endpoint=get_secret("AZURE_OPENAI_ENDPOINT")
-    )
-    DEPLOYMENT_NAME = get_secret("AZURE_OPENAI_DEPLOYMENT_NAME")
-except Exception as e:
-    # We use st.error here so it shows up on the UI if connection fails
-    st.error(f"Azure Connection Error: {e}")
-    st.stop()
+REQUIRED_ENV_VARS = [
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_API_VERSION",
+    "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_DEPLOYMENT_NAME",
+]
+
+
+def get_missing_config():
+    return [name for name in REQUIRED_ENV_VARS if not os.environ.get(name)]
+
+
+def get_client_and_deployment():
+    """Return (client, deployment_name, error_message)."""
+    missing = get_missing_config()
+    if missing:
+        missing_list = ", ".join(missing)
+        return None, None, f"Missing Azure OpenAI configuration: {missing_list}"
+
+    try:
+        client = AzureOpenAI(
+            api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION"),
+            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+        )
+        deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
+        return client, deployment_name, None
+    except Exception as exc:
+        return None, None, f"Azure client initialization error: {exc}"
