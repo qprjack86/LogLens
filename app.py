@@ -36,16 +36,47 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB total request size
 ALLOWED_UPLOAD_EXTENSIONS = {".log", ".zip", ".txt"}
 MAX_UPLOAD_FILES = 10
 MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024  # 20MB per file
+MAX_ZIP_ENTRY_BYTES = 25 * 1024 * 1024  # 25MB max for extracted file inside ZIP
+MAX_ZIP_FILES_TO_EXTRACT = 3
+STATE_TTL_MINUTES = 120
+MAX_STATE_SESSIONS = 500
 
 # In-memory state by browser session id. Keeps large snippets out of cookies.
 APP_STATE = {}
+LOG_TYPE_PRIORITY = {"GENERIC": 0, "INTUNE": 1, "FSLOGIX": 2}
+
+
+def _prune_state(now):
+    stale_keys = []
+    for sid, state in APP_STATE.items():
+        last_accessed = state.get("last_accessed")
+        if not last_accessed or (now - last_accessed).total_seconds() > STATE_TTL_MINUTES * 60:
+            stale_keys.append(sid)
+
+    for sid in stale_keys:
+        APP_STATE.pop(sid, None)
+
+    if len(APP_STATE) <= MAX_STATE_SESSIONS:
+        return
+
+    sorted_sessions = sorted(
+        APP_STATE.items(),
+        key=lambda item: item[1].get("last_accessed", datetime.min),
+    )
+    excess = len(APP_STATE) - MAX_STATE_SESSIONS
+    for sid, _ in sorted_sessions[:excess]:
+        APP_STATE.pop(sid, None)
 
 
 def get_state():
+    now = datetime.now()
+    _prune_state(now)
+
     sid = session.get("sid")
     if not sid:
         sid = str(uuid.uuid4())
         session["sid"] = sid
+
     if sid not in APP_STATE:
         APP_STATE[sid] = {
             "report_history": [],
@@ -56,7 +87,10 @@ def get_state():
             "snippet": None,
             "metrics": None,
             "uploaded_files": [],
+            "last_accessed": now,
         }
+
+    APP_STATE[sid]["last_accessed"] = now
     return APP_STATE[sid]
 
 
@@ -92,6 +126,48 @@ def validate_uploads(uploaded_files):
     return None
 
 
+def update_detected_type(current_type, candidate_type):
+    """Preserve the most specific detected log type across all uploads."""
+    return (
+        candidate_type
+        if LOG_TYPE_PRIORITY.get(candidate_type, 0) > LOG_TYPE_PRIORITY.get(current_type, 0)
+        else current_type
+    )
+
+
+
+def _select_zip_candidates(zip_handle, file_names, detected_type):
+    target_patterns = LOG_PROFILES[detected_type]["priority_files"]
+    selected = []
+    seen = set()
+
+    for pattern in target_patterns:
+        matches = [
+            file_name
+            for file_name in file_names
+            if fnmatch.fnmatch(file_name.lower(), pattern.lower())
+        ]
+        for match in sorted(
+            matches,
+            key=lambda file_name: zip_handle.getinfo(file_name).file_size,
+            reverse=True,
+        ):
+            if match not in seen:
+                selected.append(match)
+                seen.add(match)
+            if len(selected) >= MAX_ZIP_FILES_TO_EXTRACT:
+                return selected
+
+    if selected:
+        return selected
+
+    logs = [file_name for file_name in file_names if file_name.lower().endswith(".log")]
+    logs.sort(
+        key=lambda file_name: zip_handle.getinfo(file_name).file_size,
+        reverse=True,
+    )
+    return logs[:MAX_ZIP_FILES_TO_EXTRACT]
+
 def parse_uploads(uploaded_files):
     combined_log_text = ""
     file_names = [f.filename for f in uploaded_files if f and f.filename]
@@ -107,46 +183,35 @@ def parse_uploads(uploaded_files):
         if uploaded_file.filename.lower().endswith(".zip"):
             try:
                 with zipfile.ZipFile(uploaded_file.stream) as zip_handle:
-                    all_files = zip_handle.namelist()
-                    detected_log_type = detect_log_type(uploaded_file.filename, file_list=all_files)
+                    all_files = [name for name in zip_handle.namelist() if not name.endswith("/")]
+                    zip_detected = detect_log_type(uploaded_file.filename, file_list=all_files)
+                    detected_log_type = update_detected_type(detected_log_type, zip_detected)
 
-                    target_patterns = LOG_PROFILES[detected_log_type]["priority_files"]
-                    chosen_file = None
-                    for pattern in target_patterns:
-                        matches = [
-                            file_name
-                            for file_name in all_files
-                            if fnmatch.fnmatch(file_name.lower(), pattern.lower())
-                        ]
-                        if matches:
-                            chosen_file = matches[0]
-                            break
-
-                    if not chosen_file:
-                        logs = [file_name for file_name in all_files if file_name.lower().endswith(".log")]
-                        if logs:
-                            logs.sort(
-                                key=lambda file_name: zip_handle.getinfo(file_name).file_size,
-                                reverse=True,
+                    chosen_files = _select_zip_candidates(zip_handle, all_files, zip_detected)
+                    for chosen_file in chosen_files:
+                        chosen_info = zip_handle.getinfo(chosen_file)
+                        if chosen_info.file_size > MAX_ZIP_ENTRY_BYTES:
+                            flash(
+                                f"Skipped {chosen_file} from {uploaded_file.filename}: "
+                                f"file is larger than {MAX_ZIP_ENTRY_BYTES // (1024 * 1024)}MB.",
+                                "error",
                             )
-                            chosen_file = logs[0]
+                            continue
 
-                    if chosen_file:
                         combined_log_text += (
                             f"\n\n--- EXTRACTED: {chosen_file} (from {uploaded_file.filename}) ---\n"
                         )
                         with zip_handle.open(chosen_file) as extracted_file:
                             decoded = decode_file(extracted_file.read())
                             if decoded:
-                                file_text = decoded
+                                file_text += f"\n{decoded}" if file_text else decoded
             except Exception as exc:
                 flash(f"Error reading ZIP {uploaded_file.filename}: {exc}", "error")
         else:
             combined_log_text += f"\n\n--- FILE: {uploaded_file.filename} ---\n"
             file_text = decode_file(uploaded_file.stream.read())
             file_detected = detect_log_type(uploaded_file.filename, content=file_text)
-            if file_detected != "GENERIC":
-                detected_log_type = file_detected
+            detected_log_type = update_detected_type(detected_log_type, file_detected)
 
         if file_text:
             combined_log_text += file_text
