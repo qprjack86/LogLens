@@ -1,0 +1,81 @@
+:root {
+  color-scheme: dark;
+  --bg: #0e1117;
+  --panel: #171c26;
+  --border: #293141;
+  --text: #e7eaf0;
+  --muted: #97a0b3;
+  --accent: #3b82f6;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, sans-serif;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 100vh;
+}
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 1rem;
+}
+.content {
+  padding: 1.5rem;
+  max-width: 1100px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 1rem;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.metric { background:#0f141d; border:1px solid var(--border); padding:.75rem; border-radius:8px; }
+.metric span { color: var(--muted); display:block; }
+.metric strong { font-size: 1.1rem; }
+.primary, button, .button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+input[type='text'], input[type='file'] {
+  width: 100%;
+  padding: .55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0f141d;
+  color: var(--text);
+}
+.inline-form { display:flex; gap:.5rem; align-items:center; flex-wrap: wrap; }
+pre { white-space: pre-wrap; background:#0f141d; border:1px solid var(--border); padding:.75rem; border-radius:8px; }
+.alerts { margin: 0.75rem 0; }
+.alert { padding: .6rem .8rem; border-radius: 8px; margin-bottom:.5rem; }
+.alert.error { background:#3b1e24; border:1px solid #7b2f3f; }
+.alert.success { background:#193025; border:1px solid #2c6b4f; }
+.badge { background:#10233f; border:1px solid #24508b; color:#9cc2ff; display:inline-block; padding:.4rem .7rem; border-radius:999px; margin-bottom:.8rem; }
+.muted { color: var(--muted); }
+.chat { padding:.6rem; border-radius:8px; margin:.4rem 0; }
+.chat.user { background:#1a2332; }
+.chat.ai { background:#17261d; }
+.markdown table { width:100%; border-collapse:collapse; }
+.markdown th, .markdown td { border:1px solid var(--border); padding:.4rem; text-align:left; }
