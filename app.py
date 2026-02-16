@@ -1,5 +1,6 @@
 import fnmatch
 import os
+import re
 import uuid
 import zipfile
 from datetime import datetime
@@ -101,6 +102,53 @@ def parse_uploads(uploaded_files):
     return combined_log_text, file_names, detected_log_type
 
 
+
+
+def _parse_pipe_row(segment):
+    cells = [cell.strip() for cell in segment.split("|") if cell.strip()]
+    return cells if len(cells) >= 3 else None
+
+
+def normalize_remediation_markdown(content):
+    """Normalize flattened pipe-delimited remediation output into a markdown table."""
+    if not content:
+        return content
+
+    # If a valid markdown table separator already exists, keep original formatting.
+    if "| ---" in content or "|---" in content:
+        return content
+
+    rows = []
+    segments = [part.strip() for part in re.split(r"\s*\|\|\s*", content.strip()) if part.strip()]
+    for segment in segments:
+        parsed = _parse_pipe_row(segment)
+        if parsed:
+            rows.append(parsed[:3])
+
+    # Fallback for flattened text like: | Phase | Action | Command | | Phase | ...
+    if len(rows) < 2:
+        flat_cells = [cell.strip() for cell in content.replace("\n", " ").split("|") if cell.strip()]
+        if len(flat_cells) >= 6:
+            rows = [flat_cells[idx:idx + 3] for idx in range(0, len(flat_cells), 3) if len(flat_cells[idx:idx + 3]) == 3]
+
+    if len(rows) < 2:
+        return content
+
+    header = rows[0]
+    expected_header = ["phase", "action", "command"]
+    if [h.lower() for h in header] != expected_header:
+        return content
+
+    table_lines = [
+        "| Phase | Action | Command |",
+        "| --- | --- | --- |",
+    ]
+    for phase, action, command in rows[1:]:
+        table_lines.append(f"| {phase} | {action} | {command} |")
+
+    return "\n".join(table_lines)
+
+
 def render_markdown(content):
     return Markup(markdown.markdown(content, extensions=["tables", "fenced_code"]))
 
@@ -124,7 +172,7 @@ def index():
         state=state,
         missing_config=missing_config,
         analysis_part1=render_markdown(analysis_part1) if analysis_part1 else None,
-        analysis_part2=render_markdown(analysis_part2) if analysis_part2 else None,
+        analysis_part2=render_markdown(normalize_remediation_markdown(analysis_part2)) if analysis_part2 else None,
     )
 
 

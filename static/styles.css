@@ -77,5 +77,25 @@ pre { white-space: pre-wrap; background:#0f141d; border:1px solid var(--border);
 .chat { padding:.6rem; border-radius:8px; margin:.4rem 0; }
 .chat.user { background:#1a2332; }
 .chat.ai { background:#17261d; }
-.markdown table { width:100%; border-collapse:collapse; }
-.markdown th, .markdown td { border:1px solid var(--border); padding:.4rem; text-align:left; }
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.markdown th, .markdown td {
+  border: 1px solid var(--border);
+  padding: .55rem;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+.markdown th:nth-child(1), .markdown td:nth-child(1) {
+  width: 110px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.markdown th:nth-child(3), .markdown td:nth-child(3) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
