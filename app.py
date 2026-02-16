@@ -4,6 +4,7 @@ import fnmatch
 from datetime import datetime
 
 # --- IMPORT MODULES ---
+# Ensure analysis_engine.py is in the same folder
 from analysis_engine import (
     decode_file, 
     sanitize_log, 
@@ -17,19 +18,25 @@ from analysis_engine import (
 )
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Universal Log Analyser", page_icon="🔍", layout="wide")
+st.set_page_config(
+    page_title="LogLens AI", 
+    page_icon="🔍", 
+    layout="wide"
+)
 
 # --- SESSION STATE ---
+# Initialize state variables to persist data between re-runs
 if "report_history" not in st.session_state: st.session_state.report_history = []
 if "active_analysis" not in st.session_state: st.session_state.active_analysis = None
 if "active_snippet" not in st.session_state: st.session_state.active_snippet = None
 if "qa_history" not in st.session_state: st.session_state.qa_history = [] 
 
 # --- MAIN UI ---
-st.title("🔍 Universal Log Analyser")
-st.markdown("Analyze **FSLogix**, **Intune**, and **System** logs using Azure OpenAI.")
+st.title("🔍 LogLens AI")
+st.markdown("Forensic analysis for **FSLogix**, **Intune**, and **System** logs.")
 st.divider()
 
+# Layout: Settings on left, Upload on right
 col_settings, col_upload = st.columns([1, 2])
 with col_settings:
     st.subheader("⚙️ Settings")
@@ -41,38 +48,33 @@ with col_upload:
 if uploaded_files:
     combined_log_text = ""
     file_names = [f.name for f in uploaded_files]
-    detected_log_type = "GENERIC" # Default
+    detected_log_type = "GENERIC"
     
-    # 1. READ FILES SMARTLY
+    # --- 1. SMART FILE PROCESSING ---
     for uploaded_file in uploaded_files:
         file_text = ""
         
-        # --- ZIP HANDLING ---
+        # A. ZIP Handling
         if uploaded_file.name.endswith('.zip'):
             try:
                 with zipfile.ZipFile(uploaded_file) as z:
                     all_files = z.namelist()
-                    
-                    # A. Detect Type based on file structure
+                    # Detect Type based on file list (e.g., if it contains 'Profile_*.log')
                     detected_log_type = detect_log_type(uploaded_file.name, file_list=all_files)
                     
-                    # B. Find Priority File
-                    # We look for the "Best" log file inside the zip based on the profile
+                    # Find the most relevant file inside the ZIP
                     target_patterns = LOG_PROFILES[detected_log_type]["priority_files"]
-                    
                     chosen_file = None
                     for pattern in target_patterns:
-                        # Find matching file (case insensitive wildcard match)
                         matches = [f for f in all_files if fnmatch.fnmatch(f.lower(), pattern.lower())]
                         if matches:
-                            chosen_file = matches[0] # Pick the first match
+                            chosen_file = matches[0]
                             break
                     
-                    # C. Fallback: If no priority file found, grab largest .log
+                    # Fallback: Just take the largest .log file
                     if not chosen_file:
                         logs = [f for f in all_files if f.endswith(".log")]
                         if logs: 
-                            # Sort by size to get the main log, not a tiny setup log
                             logs.sort(key=lambda x: z.getinfo(x).file_size, reverse=True)
                             chosen_file = logs[0]
 
@@ -84,19 +86,19 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"Error reading ZIP: {e}")
 
-        # --- SINGLE FILE HANDLING ---
+        # B. Single File Handling
         else:
             combined_log_text += f"\n\n--- FILE: {uploaded_file.name} ---\n"
             file_text = decode_file(uploaded_file.getvalue())
-            # Update detection for single files
+            # Re-detect type based on content if we haven't found a specific type yet
             if detect_log_type(uploaded_file.name, content=file_text) != "GENERIC":
                  detected_log_type = detect_log_type(uploaded_file.name, content=file_text)
 
         if file_text: combined_log_text += file_text
 
+    # --- 2. DISPLAY & ANALYSIS ---
     if len(combined_log_text) > 100:
-        
-        # UI Badge for Log Type
+        # UI Badges
         if detected_log_type == "FSLOGIX":
             st.info(f"📂 **Detected:** FSLogix Profile Log")
         elif detected_log_type == "INTUNE":
@@ -104,9 +106,10 @@ if uploaded_files:
         else:
             st.warning(f"📄 **Detected:** Generic Log")
 
+        # PII Sanitization
         processed_text = sanitize_log(combined_log_text) if enable_sanitization else combined_log_text
         
-        # DASHBOARD (FSLogix Only)
+        # Dashboard (FSLogix Only)
         if detected_log_type == "FSLOGIX":
             metrics = extract_performance_metrics(processed_text)
             if metrics:
@@ -117,16 +120,20 @@ if uploaded_files:
                 m3.metric("Critical Errors", metrics.get("Total Errors"))
                 st.divider()
 
-        # EXTRACTION
+        # Snippet Extraction
         snippet = extract_errors(processed_text, log_type=detected_log_type)
-        with st.expander(f"📂 View Extracted Snippet ({detected_log_type} Filter)"): st.text(snippet)
+        with st.expander(f"📂 View Extracted Snippet ({detected_log_type} Filter)"): 
+            st.text(snippet)
         
-        # ANALYSIS
+        # Run Analysis Button
         if st.button("Run Analysis", type="primary"):
             with st.spinner(f'Analyzing as {detected_log_type}...'):
+                # Reset Q&A when new analysis runs
                 st.session_state.qa_history = [] 
+                
                 raw_response, usage_stats = analyze_with_ai(snippet, log_type=detected_log_type)
                 
+                # Save to Session State
                 st.session_state.active_analysis = raw_response
                 st.session_state.active_snippet = snippet
                 st.session_state.report_history.append({
@@ -135,10 +142,11 @@ if uploaded_files:
                     "result": raw_response
                 })
         
-        # RESULTS
+        # --- 3. RESULTS DISPLAY ---
         if st.session_state.active_analysis:
             raw_response = st.session_state.active_analysis
             
+            # Split Remediation Plan if the separator exists
             if "|||SPLIT|||" in raw_response:
                 part1, part2 = raw_response.split("|||SPLIT|||")
                 st.markdown(part1) 
@@ -151,7 +159,7 @@ if uploaded_files:
             
             st.divider()
 
-            # FEEDBACK
+            # Feedback & Download
             c_feed, c_dl = st.columns([3, 1])
             with c_feed:
                 st.subheader("📢 Rate Analysis")
@@ -166,12 +174,15 @@ if uploaded_files:
 
             st.divider()
 
-            # Q&A
-            st.subheader("💬 Ask the Log")
+            # --- 4. Q&A INTERFACE ---
+            st.subheader("💬 Ask LogLens")
+            
+            # Show history
             for q, a in st.session_state.qa_history:
                 with st.chat_message("user"): st.write(q)
                 with st.chat_message("assistant"): st.write(a)
 
+            # Chat Input
             if question := st.chat_input("Ask a question about this log..."):
                 with st.chat_message("user"): st.write(question)
                 with st.spinner("Checking log..."):
@@ -181,8 +192,9 @@ if uploaded_files:
             
     elif uploaded_files: st.error("❌ Could not decode files.")
 
-# SIDEBAR
+# --- SIDEBAR BRANDING & HISTORY ---
 with st.sidebar:
+    st.title("LogLens 🔍")
     st.header("🕒 Recent Analysis")
     for item in reversed(st.session_state.report_history):
         with st.expander(f"{item['timestamp']} - {item['files'][:20]}..."):

@@ -1,23 +1,37 @@
-FROM python:3.9-slim
+FROM python:3.9.18-slim
+
+# Security: Prevent Python from writing pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+# Security: Create a non-root user
+RUN groupadd -r appgroup && \
+useradd -r -d /home/appuser -m appuser
 
 # Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy ALL application files
-COPY . .
+# Security: Copy files with correct ownership
+COPY --chown=appuser:appgroup . .
 
-# Expose Streamlit's default port
+# Security: Create .streamlit folder with user permissions
+RUN mkdir -p /app/.streamlit && \
+    chown -R appuser:appgroup /app /home/appuser
+
+# Security: Switch to non-root user
+USER appuser
+
+# Expose Port
 EXPOSE 8501
 
-# --- CONFIGURATION FIX ---
-# We create a config.toml file to permanently fix the 400 Error.
-# 1. enableXsrfProtection = false: TRUSTS the Azure Load Balancer (Fixes the 400 Error).
-# 2. enableCORS = false: Allows the browser to talk to the container via Azure.
-# 3. maxUploadSize = 2000: Allows 2GB uploads.
-RUN mkdir -p /root/.streamlit
+
+# --- LOCAL CONFIGURATION ---
+# 1. enableXsrfProtection=false: Required because localhost doesn't send secure headers.
+# 2. enableCORS=false: Allows local browser access.
+# 3. No serverAddress: defaults to localhost.
 RUN echo "\
 [server]\n\
 headless = true\n\
@@ -27,12 +41,6 @@ maxUploadSize = 2000\n\
 enableCORS = false\n\
 enableXsrfProtection = false\n\
 enableWebsocketCompression = false\n\
-\n\
-[browser]\n\
-gatherUsageStats = false\n\
-serverAddress = 'fslogix-analyser.purplegrass-6ec8783e.uksouth.azurecontainerapps.io'\n\
-serverPort = 443\n\
-" > /root/.streamlit/config.toml
+" > /app/.streamlit/config.toml
 
-# Run Streamlit (No flags needed now, they are in config.toml)
 CMD ["streamlit", "run", "app.py"]
