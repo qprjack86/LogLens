@@ -37,6 +37,11 @@
         {% endif %}
         Azure example: <code>docker run -p 8501:8501 -e AZURE_OPENAI_API_KEY=... -e AZURE_OPENAI_API_VERSION=... -e AZURE_OPENAI_ENDPOINT=... -e AZURE_OPENAI_DEPLOYMENT_NAME=... loglens-local</code><br />
         OpenAI-compatible example: <code>docker run -p 8501:8501 -e LLM_PROVIDER=openai -e OPENAI_API_KEY=... -e OPENAI_MODEL=kimi-2.5 -e OPENAI_BASE_URL=... (or OPENAI_API_BASE=...) loglens-local</code>
+
+      {% if missing_config %}
+      <div class="alert error">
+        Azure is not configured. Set: {{ ", ".join(missing_config) }}<br />
+        Example: <code>docker run -p 8501:8501 -e AZURE_OPENAI_API_KEY=... -e AZURE_OPENAI_API_VERSION=... -e AZURE_OPENAI_ENDPOINT=... -e AZURE_OPENAI_DEPLOYMENT_NAME=... loglens-local</code>
       </div>
       {% endif %}
 
