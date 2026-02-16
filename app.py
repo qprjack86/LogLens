@@ -1,68 +1,68 @@
-import streamlit as st
-import zipfile
 import fnmatch
+import os
+import uuid
+import zipfile
 from datetime import datetime
 
-# --- IMPORT MODULES ---
-# Ensure analysis_engine.py is in the same folder
+from flask import Flask, flash, redirect, render_template, request, send_file, session, url_for
+from markupsafe import Markup
+import markdown
+
 from analysis_engine import (
-    decode_file, 
-    sanitize_log, 
-    extract_performance_metrics, 
-    extract_errors, 
-    analyze_with_ai, 
-    save_feedback,
+    LOG_PROFILES,
+    analyze_with_ai,
     ask_log_question,
+    decode_file,
     detect_log_type,
-    LOG_PROFILES
+    extract_errors,
+    extract_performance_metrics,
+    sanitize_log,
+    save_feedback,
 )
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="LogLens AI", 
-    page_icon="🔍", 
-    layout="wide"
-)
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 
-# --- SESSION STATE ---
-# Initialize state variables to persist data between re-runs
-if "report_history" not in st.session_state: st.session_state.report_history = []
-if "active_analysis" not in st.session_state: st.session_state.active_analysis = None
-if "active_snippet" not in st.session_state: st.session_state.active_snippet = None
-if "qa_history" not in st.session_state: st.session_state.qa_history = [] 
+# In-memory state by browser session id. Keeps large snippets out of cookies.
+APP_STATE = {}
 
-# --- MAIN UI ---
-st.title("🔍 LogLens AI")
-st.markdown("Forensic analysis for **FSLogix**, **Intune**, and **System** logs.")
-st.divider()
 
-# Layout: Settings on left, Upload on right
-col_settings, col_upload = st.columns([1, 2])
-with col_settings:
-    st.subheader("⚙️ Settings")
-    enable_sanitization = st.checkbox("Strip PII (Usernames/SIDs)", value=False)
+def get_state():
+    sid = session.get("sid")
+    if not sid:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+    if sid not in APP_STATE:
+        APP_STATE[sid] = {
+            "report_history": [],
+            "active_analysis": None,
+            "active_snippet": None,
+            "qa_history": [],
+            "detected_log_type": None,
+            "snippet": None,
+            "metrics": None,
+            "uploaded_files": [],
+        }
+    return APP_STATE[sid]
 
-with col_upload:
-    uploaded_files = st.file_uploader("Upload Logs (ZIPs supported)", type=["log", "zip", "txt"], accept_multiple_files=True)
 
-if uploaded_files:
+def parse_uploads(uploaded_files):
     combined_log_text = ""
-    file_names = [f.name for f in uploaded_files]
+    file_names = [f.filename for f in uploaded_files if f and f.filename]
     detected_log_type = "GENERIC"
-    
-    # --- 1. SMART FILE PROCESSING ---
+
     for uploaded_file in uploaded_files:
+        if not uploaded_file or not uploaded_file.filename:
+            continue
+
         file_text = ""
-        
-        # A. ZIP Handling
-        if uploaded_file.name.endswith('.zip'):
+
+        if uploaded_file.filename.lower().endswith(".zip"):
             try:
-                with zipfile.ZipFile(uploaded_file) as z:
+                with zipfile.ZipFile(uploaded_file.stream) as z:
                     all_files = z.namelist()
-                    # Detect Type based on file list (e.g., if it contains 'Profile_*.log')
-                    detected_log_type = detect_log_type(uploaded_file.name, file_list=all_files)
-                    
-                    # Find the most relevant file inside the ZIP
+                    detected_log_type = detect_log_type(uploaded_file.filename, file_list=all_files)
+
                     target_patterns = LOG_PROFILES[detected_log_type]["priority_files"]
                     chosen_file = None
                     for pattern in target_patterns:
@@ -70,135 +70,150 @@ if uploaded_files:
                         if matches:
                             chosen_file = matches[0]
                             break
-                    
-                    # Fallback: Just take the largest .log file
+
                     if not chosen_file:
-                        logs = [f for f in all_files if f.endswith(".log")]
-                        if logs: 
+                        logs = [f for f in all_files if f.lower().endswith(".log")]
+                        if logs:
                             logs.sort(key=lambda x: z.getinfo(x).file_size, reverse=True)
                             chosen_file = logs[0]
 
                     if chosen_file:
-                        combined_log_text += f"\n\n--- EXTRACTED: {chosen_file} (from {uploaded_file.name}) ---\n"
-                        with z.open(chosen_file) as f: 
+                        combined_log_text += (
+                            f"\n\n--- EXTRACTED: {chosen_file} (from {uploaded_file.filename}) ---\n"
+                        )
+                        with z.open(chosen_file) as f:
                             decoded = decode_file(f.read())
-                            if decoded: file_text = decoded
-            except Exception as e:
-                st.error(f"Error reading ZIP: {e}")
-
-        # B. Single File Handling
+                            if decoded:
+                                file_text = decoded
+            except Exception as exc:
+                flash(f"Error reading ZIP {uploaded_file.filename}: {exc}", "error")
         else:
-            combined_log_text += f"\n\n--- FILE: {uploaded_file.name} ---\n"
-            file_text = decode_file(uploaded_file.getvalue())
-            # Re-detect type based on content if we haven't found a specific type yet
-            if detect_log_type(uploaded_file.name, content=file_text) != "GENERIC":
-                 detected_log_type = detect_log_type(uploaded_file.name, content=file_text)
+            combined_log_text += f"\n\n--- FILE: {uploaded_file.filename} ---\n"
+            file_text = decode_file(uploaded_file.read())
+            file_detected = detect_log_type(uploaded_file.filename, content=file_text)
+            if file_detected != "GENERIC":
+                detected_log_type = file_detected
 
-        if file_text: combined_log_text += file_text
+        if file_text:
+            combined_log_text += file_text
 
-    # --- 2. DISPLAY & ANALYSIS ---
-    if len(combined_log_text) > 100:
-        # UI Badges
-        if detected_log_type == "FSLOGIX":
-            st.info(f"📂 **Detected:** FSLogix Profile Log")
-        elif detected_log_type == "INTUNE":
-            st.success(f"📱 **Detected:** Microsoft Intune Log")
+    return combined_log_text, file_names, detected_log_type
+
+
+def render_markdown(content):
+    return Markup(markdown.markdown(content, extensions=["tables", "fenced_code"]))
+
+
+@app.route("/", methods=["GET"])
+def index():
+    state = get_state()
+    analysis = state.get("active_analysis")
+    analysis_part1 = None
+    analysis_part2 = None
+    if analysis:
+        if "|||SPLIT|||" in analysis:
+            analysis_part1, analysis_part2 = analysis.split("|||SPLIT|||", 1)
         else:
-            st.warning(f"📄 **Detected:** Generic Log")
+            analysis_part1 = analysis
 
-        # PII Sanitization
-        processed_text = sanitize_log(combined_log_text) if enable_sanitization else combined_log_text
-        
-        # Dashboard (FSLogix Only)
-        if detected_log_type == "FSLOGIX":
-            metrics = extract_performance_metrics(processed_text)
-            if metrics:
-                st.subheader("⏱️ Session Health")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Profile Load", metrics.get("Load Profile Time"))
-                m2.metric("VHD Mount", metrics.get("VHD Mount Time"))
-                m3.metric("Critical Errors", metrics.get("Total Errors"))
-                st.divider()
+    return render_template(
+        "index.html",
+        state=state,
+        analysis_part1=render_markdown(analysis_part1) if analysis_part1 else None,
+        analysis_part2=render_markdown(analysis_part2) if analysis_part2 else None,
+    )
 
-        # Snippet Extraction
-        snippet = extract_errors(processed_text, log_type=detected_log_type)
-        with st.expander(f"📂 View Extracted Snippet ({detected_log_type} Filter)"): 
-            st.text(snippet)
-        
-        # Run Analysis Button
-        if st.button("Run Analysis", type="primary"):
-            with st.spinner(f'Analyzing as {detected_log_type}...'):
-                # Reset Q&A when new analysis runs
-                st.session_state.qa_history = [] 
-                
-                raw_response, usage_stats = analyze_with_ai(snippet, log_type=detected_log_type)
-                
-                # Save to Session State
-                st.session_state.active_analysis = raw_response
-                st.session_state.active_snippet = snippet
-                st.session_state.report_history.append({
-                    "timestamp": datetime.now().strftime("%H:%M:%S"),
-                    "files": ", ".join(file_names),
-                    "result": raw_response
-                })
-        
-        # --- 3. RESULTS DISPLAY ---
-        if st.session_state.active_analysis:
-            raw_response = st.session_state.active_analysis
-            
-            # Split Remediation Plan if the separator exists
-            if "|||SPLIT|||" in raw_response:
-                part1, part2 = raw_response.split("|||SPLIT|||")
-                st.markdown(part1) 
-                st.divider()
-                st.subheader("🛠️ Remediation Plan") 
-                st.markdown(part2)
-            else:
-                st.warning("Raw Output:")
-                st.markdown(raw_response)
-            
-            st.divider()
 
-            # Feedback & Download
-            c_feed, c_dl = st.columns([3, 1])
-            with c_feed:
-                st.subheader("📢 Rate Analysis")
-                sentiment = st.feedback("thumbs")
-                if sentiment is not None:
-                    sentiment_text = "Positive" if sentiment == 1 else "Negative"
-                    save_feedback(sentiment_text, "User Voted", st.session_state.active_snippet, raw_response)
-                    st.toast(f"Feedback Saved")
-            
-            with c_dl:
-                st.download_button("📥 Download Report", raw_response.replace("|||SPLIT|||", "\n\n## Remediation Plan\n"), "log_report.md")
+@app.post("/analyze")
+def analyze():
+    state = get_state()
+    uploaded_files = request.files.getlist("log_files")
+    enable_sanitization = request.form.get("sanitize") == "on"
 
-            st.divider()
+    if not uploaded_files or not any(f.filename for f in uploaded_files):
+        flash("Please upload at least one log file.", "error")
+        return redirect(url_for("index"))
 
-            # --- 4. Q&A INTERFACE ---
-            st.subheader("💬 Ask LogLens")
-            
-            # Show history
-            for q, a in st.session_state.qa_history:
-                with st.chat_message("user"): st.write(q)
-                with st.chat_message("assistant"): st.write(a)
+    combined_log_text, file_names, detected_log_type = parse_uploads(uploaded_files)
 
-            # Chat Input
-            if question := st.chat_input("Ask a question about this log..."):
-                with st.chat_message("user"): st.write(question)
-                with st.spinner("Checking log..."):
-                    answer = ask_log_question(st.session_state.active_snippet, question)
-                    with st.chat_message("assistant"): st.write(answer)
-                    st.session_state.qa_history.append((question, answer))
-            
-    elif uploaded_files: st.error("❌ Could not decode files.")
+    if len(combined_log_text) <= 100:
+        flash("Could not decode files.", "error")
+        return redirect(url_for("index"))
 
-# --- SIDEBAR BRANDING & HISTORY ---
-with st.sidebar:
-    st.title("LogLens 🔍")
-    st.header("🕒 Recent Analysis")
-    for item in reversed(st.session_state.report_history):
-        with st.expander(f"{item['timestamp']} - {item['files'][:20]}..."):
-            if "|||SPLIT|||" in item['result']:
-                parts = item['result'].split("|||SPLIT|||")
-                st.markdown(parts[0])
-            else: st.markdown(item['result'])
+    processed_text = sanitize_log(combined_log_text) if enable_sanitization else combined_log_text
+    snippet = extract_errors(processed_text, log_type=detected_log_type)
+
+    state["qa_history"] = []
+    raw_response, _ = analyze_with_ai(snippet, log_type=detected_log_type)
+    state["active_analysis"] = raw_response
+    state["active_snippet"] = snippet
+    state["snippet"] = snippet
+    state["detected_log_type"] = detected_log_type
+    state["uploaded_files"] = file_names
+    state["metrics"] = (
+        extract_performance_metrics(processed_text) if detected_log_type == "FSLOGIX" else None
+    )
+
+    state["report_history"].append(
+        {
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "files": ", ".join(file_names),
+            "result": raw_response,
+        }
+    )
+    flash(f"Analysis complete ({detected_log_type}).", "success")
+    return redirect(url_for("index"))
+
+
+@app.post("/ask")
+def ask():
+    state = get_state()
+    question = request.form.get("question", "").strip()
+    if not state.get("active_snippet"):
+        flash("Run an analysis before asking questions.", "error")
+        return redirect(url_for("index"))
+    if not question:
+        flash("Question cannot be empty.", "error")
+        return redirect(url_for("index"))
+
+    answer = ask_log_question(state["active_snippet"], question)
+    state["qa_history"].append((question, answer))
+    return redirect(url_for("index"))
+
+
+@app.post("/feedback")
+def feedback():
+    state = get_state()
+    sentiment = request.form.get("sentiment")
+    if not state.get("active_analysis"):
+        flash("No active analysis to rate.", "error")
+        return redirect(url_for("index"))
+
+    sentiment_text = "Positive" if sentiment == "positive" else "Negative"
+    save_feedback(
+        sentiment_text,
+        "User Voted",
+        state.get("active_snippet", ""),
+        state.get("active_analysis", ""),
+    )
+    flash("Feedback saved.", "success")
+    return redirect(url_for("index"))
+
+
+@app.get("/download")
+def download_report():
+    state = get_state()
+    analysis = state.get("active_analysis")
+    if not analysis:
+        flash("No report to download.", "error")
+        return redirect(url_for("index"))
+
+    report_content = analysis.replace("|||SPLIT|||", "\n\n## Remediation Plan\n")
+    path = "log_report.md"
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(report_content)
+    return send_file(path, as_attachment=True)
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8501, debug=True)
