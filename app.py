@@ -36,6 +36,7 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB total request size
 ALLOWED_UPLOAD_EXTENSIONS = {".log", ".zip", ".txt"}
 MAX_UPLOAD_FILES = 10
 MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024  # 20MB per file
+MAX_ZIP_ENTRY_BYTES = 25 * 1024 * 1024  # 25MB max for extracted file inside ZIP
 
 # In-memory state by browser session id. Keeps large snippets out of cookies.
 APP_STATE = {}
@@ -93,18 +94,19 @@ def validate_uploads(uploaded_files):
     return None
 
 
+def update_detected_type(current_type, candidate_type):
+    """Preserve the most specific detected log type across all uploads."""
+    return (
+        candidate_type
+        if LOG_TYPE_PRIORITY.get(candidate_type, 0) > LOG_TYPE_PRIORITY.get(current_type, 0)
+        else current_type
+    )
+
+
 def parse_uploads(uploaded_files):
     combined_log_text = ""
     file_names = [f.filename for f in uploaded_files if f and f.filename]
     detected_log_type = "GENERIC"
-
-    def update_detected_type(current_type, candidate_type):
-        """Preserve the most specific detected log type across all uploads."""
-        return (
-            candidate_type
-            if LOG_TYPE_PRIORITY.get(candidate_type, 0) > LOG_TYPE_PRIORITY.get(current_type, 0)
-            else current_type
-        )
 
     for uploaded_file in uploaded_files:
         if not uploaded_file or not uploaded_file.filename:
@@ -116,11 +118,11 @@ def parse_uploads(uploaded_files):
         if uploaded_file.filename.lower().endswith(".zip"):
             try:
                 with zipfile.ZipFile(uploaded_file.stream) as zip_handle:
-                    all_files = zip_handle.namelist()
+                    all_files = [name for name in zip_handle.namelist() if not name.endswith("/")]
                     zip_detected = detect_log_type(uploaded_file.filename, file_list=all_files)
                     detected_log_type = update_detected_type(detected_log_type, zip_detected)
 
-                    target_patterns = LOG_PROFILES[detected_log_type]["priority_files"]
+                    target_patterns = LOG_PROFILES[zip_detected]["priority_files"]
                     chosen_file = None
                     for pattern in target_patterns:
                         matches = [
@@ -148,10 +150,18 @@ def parse_uploads(uploaded_files):
                         combined_log_text += (
                             f"\n\n--- EXTRACTED: {chosen_file} (from {uploaded_file.filename}) ---\n"
                         )
-                        with zip_handle.open(chosen_file) as extracted_file:
-                            decoded = decode_file(extracted_file.read())
-                            if decoded:
-                                file_text = decoded
+                        chosen_info = zip_handle.getinfo(chosen_file)
+                        if chosen_info.file_size > MAX_ZIP_ENTRY_BYTES:
+                            flash(
+                                f"Skipped {chosen_file} from {uploaded_file.filename}: "
+                                f"file is larger than {MAX_ZIP_ENTRY_BYTES // (1024 * 1024)}MB.",
+                                "error",
+                            )
+                        else:
+                            with zip_handle.open(chosen_file) as extracted_file:
+                                decoded = decode_file(extracted_file.read())
+                                if decoded:
+                                    file_text = decoded
             except Exception as exc:
                 flash(f"Error reading ZIP {uploaded_file.filename}: {exc}", "error")
         else:
