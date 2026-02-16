@@ -110,7 +110,8 @@ def save_feedback(sentiment, feedback_text, log_snippet, ai_response):
             ]
         )
 
-def _backend_unavailable_message(error_message):
+
+def _azure_unavailable_message(error_message):
     return (
         "### Model Backend Configuration Error\n"
         f"{error_message}\n\n"
@@ -133,7 +134,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
 
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
-        return _backend_unavailable_message(error_message), None
+        return _azure_unavailable_message(error_message), None
 
     profile = LOG_PROFILES[log_type]
 
@@ -177,7 +178,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=4000,
+            max_completion_tokens=4000,
         )
         return response.choices[0].message.content, response.usage
     except Exception as exc:
@@ -194,14 +195,14 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
 def ask_log_question(snippet, question):
     client, deployment_name, error_message = get_client_and_deployment()
     if error_message:
-        return _backend_unavailable_message(error_message)
+        return _azure_unavailable_message(error_message)
 
     prompt = f"You are a Log Assistant. Context:\n{snippet}\nQuestion: {question}\nAnswer concisely."
     try:
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
+            max_completion_tokens=500,
         )
         return response.choices[0].message.content
     except Exception as exc:

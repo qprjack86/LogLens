@@ -24,6 +24,19 @@
     <main class="content">
       <h1>🔍 LogLens AI</h1>
       <p>Forensic analysis for <strong>FSLogix</strong>, <strong>Intune</strong>, and <strong>System</strong> logs.</p>
+      <p class="muted">LLM Provider mode: <strong>{{ backend_provider }}</strong></p>
+
+      {% if has_missing_config %}
+      <div class="alert error">
+        Model backend configuration is incomplete.<br />
+        {% if missing_config.azure is defined and missing_config.azure %}
+          Missing Azure vars: {{ ", ".join(missing_config.azure) }}<br />
+        {% endif %}
+        {% if missing_config.openai is defined and missing_config.openai %}
+          Missing OpenAI-compatible vars: {{ ", ".join(missing_config.openai) }}<br />
+        {% endif %}
+        Azure example: <code>docker run -p 8501:8501 -e AZURE_OPENAI_API_KEY=... -e AZURE_OPENAI_API_VERSION=... -e AZURE_OPENAI_ENDPOINT=... -e AZURE_OPENAI_DEPLOYMENT_NAME=... loglens-local</code><br />
+        OpenAI-compatible example: <code>docker run -p 8501:8501 -e LLM_PROVIDER=openai -e OPENAI_API_KEY=... -e OPENAI_MODEL=kimi-2.5 -e OPENAI_BASE_URL=... (or OPENAI_API_BASE=...) loglens-local</code>
 
       {% if missing_config %}
       <div class="alert error">
