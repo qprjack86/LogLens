@@ -1,6 +1,7 @@
 import re
 import csv
 import os
+import time
 from datetime import datetime
 from collections import deque
 from azure_client import get_api_style, get_client_and_deployment
@@ -140,6 +141,24 @@ def _extract_response_text(response):
     return "\n".join(chunks).strip() if chunks else ""
 
 
+def _is_rate_limit_error(message):
+    lowered = message.lower()
+    return "429" in lowered or "ratelimit" in lowered or "rate limit" in lowered
+
+
+def _with_rate_limit_retries(callable_fn, max_retries=2, base_delay=1.5):
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return callable_fn()
+        except Exception as exc:
+            last_error = exc
+            if not _is_rate_limit_error(str(exc)) or attempt == max_retries:
+                raise
+            time.sleep(base_delay * (2 ** attempt))
+    raise last_error
+
+
 def _create_chat_response(client, model_name, prompt, max_tokens):
     response = client.chat.completions.create(
         model=model_name,
@@ -169,6 +188,11 @@ def _invoke_model(client, model_name, prompt, max_tokens, profile):
     last_error = None
     for call in calls:
         try:
+            return _with_rate_limit_retries(
+                lambda: call(client, model_name, prompt, max_tokens),
+                max_retries=2,
+                base_delay=1.5,
+            )
             return call(client, model_name, prompt, max_tokens)
         except Exception as exc:
             last_error = exc
@@ -189,6 +213,9 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC", analysis_mode="defaul
         return _backend_unavailable_message(error_message), None
 
     profile = LOG_PROFILES[log_type]
+
+    if analysis_mode == "deep" and len(sanitized_snippet) > 8000:
+        sanitized_snippet = sanitized_snippet[:8000] + "\n... [Deep mode context trimmed for quota]"
 
     # UPDATED PROMPT: More aggressive about the separator and formatting
     prompt = f"""
@@ -224,6 +251,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC", analysis_mode="defaul
     {sanitized_snippet}
     """
     try:
+        max_tokens = 8000 if analysis_mode == "deep" else 5000
         max_tokens = 22000 if analysis_mode == "deep" else 16000
         content, usage = _invoke_model(
             client,
@@ -235,6 +263,11 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC", analysis_mode="defaul
         return content, usage
     except Exception as exc:
         message = str(exc)
+        if _is_rate_limit_error(message):
+            return (
+                "Error: Rate limit reached for this model. Wait 30-60 seconds, retry, "
+                "or reduce deep-analysis usage/output size."
+            ), None
         if "unsupported parameter" in message.lower():
             return (
                 "Error: Backend API shape mismatch. Set OPENAI_API_STYLE=responses for this profile "
@@ -258,12 +291,18 @@ def ask_log_question(snippet, question, analysis_mode="default"):
             client,
             deployment_name,
             prompt,
+            max_tokens=3000 if analysis_mode == "deep" else 1500,
             max_tokens=6000 if analysis_mode == "deep" else 4000,
             profile=analysis_mode,
         )
         return content
     except Exception as exc:
         message = str(exc)
+        if _is_rate_limit_error(message):
+            return (
+                "Error: Rate limit reached for this model. Wait 30-60 seconds, retry, "
+                "or reduce deep-analysis usage/output size."
+            )
         if "unsupported parameter" in message.lower():
             return (
                 "Error: Backend API shape mismatch. Set OPENAI_API_STYLE=responses for this profile "

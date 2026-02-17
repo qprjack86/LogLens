@@ -58,5 +58,31 @@ class AnalysisEngineApiFallbackTests(unittest.TestCase):
         self.assertEqual(usage, {"total_tokens": 1})
 
 
+class AnalysisEngineRateLimitTests(unittest.TestCase):
+    def test_with_rate_limit_retries_then_succeeds(self):
+        calls = {"count": 0}
+
+        def flaky_call():
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise Exception("429 RateLimitReached")
+            return "ok"
+
+        with patch("analysis_engine.time.sleep") as sleep_mock:
+            result = analysis_engine._with_rate_limit_retries(flaky_call, max_retries=2, base_delay=0.01)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(calls["count"], 3)
+        self.assertEqual(sleep_mock.call_count, 2)
+
+    def test_with_rate_limit_retries_exhausts(self):
+        def always_rate_limited():
+            raise Exception("Rate limit reached")
+
+        with patch("analysis_engine.time.sleep"):
+            with self.assertRaises(Exception):
+                analysis_engine._with_rate_limit_retries(always_rate_limited, max_retries=1, base_delay=0.01)
+
+
 if __name__ == "__main__":
     unittest.main()
