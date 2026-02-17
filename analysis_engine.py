@@ -3,7 +3,7 @@ import csv
 import os
 from datetime import datetime
 from collections import deque
-from azure_client import get_client_and_deployment
+from azure_client import get_api_style, get_client_and_deployment
 
 # --- CONFIGURATION: LOG PROFILES ---
 LOG_PROFILES = {
@@ -127,11 +127,64 @@ def _backend_unavailable_message(error_message):
         "- LLM_PROVIDER=openai (optional, forces provider selection)"
     )
 
-def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
+def _extract_response_text(response):
+    if getattr(response, "output_text", None):
+        return response.output_text
+
+    chunks = []
+    for item in getattr(response, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            text = getattr(content, "text", None)
+            if text:
+                chunks.append(text)
+    return "\n".join(chunks).strip() if chunks else ""
+
+
+def _create_chat_response(client, model_name, prompt, max_tokens):
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+    )
+    return response.choices[0].message.content, getattr(response, "usage", None)
+
+
+def _create_responses_api_response(client, model_name, prompt, max_tokens):
+    response = client.responses.create(
+        model=model_name,
+        input=prompt,
+        max_output_tokens=max_tokens,
+    )
+    return _extract_response_text(response), getattr(response, "usage", None)
+
+
+def _invoke_model(client, model_name, prompt, max_tokens, profile):
+    style = get_api_style(profile=profile)
+    calls = [_create_chat_response, _create_responses_api_response]
+    if style == "responses":
+        calls = [_create_responses_api_response, _create_chat_response]
+    elif style == "chat":
+        calls = [_create_chat_response, _create_responses_api_response]
+
+    last_error = None
+    for call in calls:
+        try:
+            return call(client, model_name, prompt, max_tokens)
+        except Exception as exc:
+            last_error = exc
+            message = str(exc).lower()
+            if "unsupported parameter" in message or "responses api" in message:
+                continue
+            raise
+
+    raise last_error
+
+
+def analyze_with_ai(sanitized_snippet, log_type="GENERIC", analysis_mode="default"):
     if not sanitized_snippet or len(sanitized_snippet) < 5:
         return "ERROR_EMPTY", None
 
-    client, deployment_name, error_message = get_client_and_deployment()
+    client, deployment_name, error_message = get_client_and_deployment(profile=analysis_mode)
     if error_message:
         return _backend_unavailable_message(error_message), None
 
@@ -171,15 +224,22 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
     {sanitized_snippet}
     """
     try:
-        response = client.chat.completions.create(
-            model=deployment_name,
-            messages=[{"role": "user", "content": prompt}],
-            # UPDATED: Increased to 16000 to prevent cut-off for reasoning models
-            max_tokens=16000,
+        max_tokens = 22000 if analysis_mode == "deep" else 16000
+        content, usage = _invoke_model(
+            client,
+            deployment_name,
+            prompt,
+            max_tokens=max_tokens,
+            profile=analysis_mode,
         )
-        return response.choices[0].message.content, response.usage
+        return content, usage
     except Exception as exc:
         message = str(exc)
+        if "unsupported parameter" in message.lower():
+            return (
+                "Error: Backend API shape mismatch. Set OPENAI_API_STYLE=responses for this profile "
+                "or switch to a chat-completions-compatible model."
+            ), None
         if "404" in message and "Resource not found" in message:
             return (
                 "Error: Resource not found. Verify OPENAI_BASE_URL and OPENAI_MODEL. "
@@ -187,22 +247,28 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC"):
             ), None
         return f"Error: {message}", None
 
-def ask_log_question(snippet, question):
-    client, deployment_name, error_message = get_client_and_deployment()
+def ask_log_question(snippet, question, analysis_mode="default"):
+    client, deployment_name, error_message = get_client_and_deployment(profile=analysis_mode)
     if error_message:
         return _backend_unavailable_message(error_message)
 
     prompt = f"You are a Log Assistant. Context:\n{snippet}\nQuestion: {question}\nAnswer concisely."
     try:
-        response = client.chat.completions.create(
-            model=deployment_name,
-            messages=[{"role": "user", "content": prompt}],
-            # UPDATED: Increased to 4000 for Q&A reasoning
-            max_tokens=4000,
+        content, _ = _invoke_model(
+            client,
+            deployment_name,
+            prompt,
+            max_tokens=6000 if analysis_mode == "deep" else 4000,
+            profile=analysis_mode,
         )
-        return response.choices[0].message.content
+        return content
     except Exception as exc:
         message = str(exc)
+        if "unsupported parameter" in message.lower():
+            return (
+                "Error: Backend API shape mismatch. Set OPENAI_API_STYLE=responses for this profile "
+                "or switch to a chat-completions-compatible model."
+            )
         if "404" in message and "Resource not found" in message:
             return (
                 "Error: Resource not found. Verify OPENAI_BASE_URL and OPENAI_MODEL. "

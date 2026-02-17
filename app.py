@@ -16,7 +16,7 @@ try:
 except ImportError:  # Optional fallback when dependency is not present.
     bleach = None
 
-from azure_client import get_missing_config
+from azure_client import get_missing_config, get_provider
 from analysis_engine import (
     LOG_PROFILES,
     analyze_with_ai,
@@ -87,6 +87,7 @@ def get_state():
             "snippet": None,
             "metrics": None,
             "uploaded_files": [],
+            "analysis_mode": "default",
             "last_accessed": now,
         }
 
@@ -327,8 +328,9 @@ def index():
         else:
             analysis_part1 = analysis
 
-    missing_config = get_missing_config()
-    backend_provider = os.environ.get("LLM_PROVIDER", "auto")
+    selected_mode = state.get("analysis_mode", "default")
+    missing_config = get_missing_config(profile=selected_mode)
+    backend_provider = get_provider(profile=selected_mode)
     has_missing_config = False
     if isinstance(missing_config, dict):
         has_missing_config = any(missing_config.get(key) for key in ["azure", "openai"])
@@ -341,6 +343,7 @@ def index():
         missing_config=missing_config,
         has_missing_config=has_missing_config,
         backend_provider=backend_provider,
+        analysis_mode=selected_mode,
         analysis_part1=render_markdown(analysis_part1) if analysis_part1 else None,
         analysis_part2=render_markdown(normalize_remediation_markdown(analysis_part2))
         if analysis_part2
@@ -353,6 +356,9 @@ def analyze():
     state = get_state()
     uploaded_files = request.files.getlist("log_files")
     enable_sanitization = request.form.get("sanitize") == "on"
+    analysis_mode = request.form.get("analysis_mode", "default").strip().lower()
+    if analysis_mode not in {"default", "deep"}:
+        analysis_mode = "default"
 
     upload_error = validate_uploads(uploaded_files)
     if upload_error:
@@ -369,12 +375,17 @@ def analyze():
     snippet = extract_errors(processed_text, log_type=detected_log_type)
 
     state["qa_history"] = []
-    raw_response, _ = analyze_with_ai(snippet, log_type=detected_log_type)
+    raw_response, _ = analyze_with_ai(
+        snippet,
+        log_type=detected_log_type,
+        analysis_mode=analysis_mode,
+    )
     state["active_analysis"] = raw_response
     state["active_snippet"] = snippet
     state["snippet"] = snippet
     state["detected_log_type"] = detected_log_type
     state["uploaded_files"] = file_names
+    state["analysis_mode"] = analysis_mode
     state["metrics"] = (
         extract_performance_metrics(processed_text) if detected_log_type == "FSLOGIX" else None
     )
@@ -386,7 +397,7 @@ def analyze():
             "result": raw_response,
         }
     )
-    flash(f"Analysis complete ({detected_log_type}).", "success")
+    flash(f"Analysis complete ({detected_log_type}, mode: {analysis_mode}).", "success")
     return redirect(url_for("index"))
 
 
@@ -401,7 +412,8 @@ def ask():
         flash("Question cannot be empty.", "error")
         return redirect(url_for("index"))
 
-    answer = ask_log_question(state["active_snippet"], question)
+    analysis_mode = state.get("analysis_mode", "default")
+    answer = ask_log_question(state["active_snippet"], question, analysis_mode=analysis_mode)
     state["qa_history"].append((question, answer))
     return redirect(url_for("index"))
 
