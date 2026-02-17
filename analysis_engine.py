@@ -193,6 +193,7 @@ def _invoke_model(client, model_name, prompt, max_tokens, profile):
                 max_retries=2,
                 base_delay=1.5,
             )
+            return call(client, model_name, prompt, max_tokens)
         except Exception as exc:
             last_error = exc
             message = str(exc).lower()
@@ -251,6 +252,7 @@ def analyze_with_ai(sanitized_snippet, log_type="GENERIC", analysis_mode="defaul
     """
     try:
         max_tokens = 8000 if analysis_mode == "deep" else 5000
+        max_tokens = 22000 if analysis_mode == "deep" else 16000
         content, usage = _invoke_model(
             client,
             deployment_name,
@@ -290,6 +292,7 @@ def ask_log_question(snippet, question, analysis_mode="default"):
             deployment_name,
             prompt,
             max_tokens=3000 if analysis_mode == "deep" else 1500,
+            max_tokens=6000 if analysis_mode == "deep" else 4000,
             profile=analysis_mode,
         )
         return content
