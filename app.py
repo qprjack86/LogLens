@@ -344,6 +344,8 @@ def index():
         has_missing_config=has_missing_config,
         backend_provider=backend_provider,
         analysis_mode=selected_mode,
+        max_upload_files=MAX_UPLOAD_FILES,
+        max_upload_file_mb=MAX_UPLOAD_FILE_BYTES // (1024 * 1024),
         analysis_part1=render_markdown(analysis_part1) if analysis_part1 else None,
         analysis_part2=render_markdown(normalize_remediation_markdown(analysis_part2))
         if analysis_part2
