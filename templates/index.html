@@ -144,6 +144,17 @@
   <div class="layout">
     <aside class="sidebar">
       <h2>LogLens 🔍</h2>
+
+      <div class="sidebar-model">
+        <h3>🤖 Model</h3>
+        <p class="muted">Provider: <strong>{{ backend_provider }}</strong></p>
+        <label for="analysis_mode">Analysis Depth</label>
+        <select name="analysis_mode" id="analysis_mode" form="analyze-form">
+          <option value="default" {% if analysis_mode == "default" %}selected{% endif %}>Default</option>
+          <option value="deep" {% if analysis_mode == "deep" %}selected{% endif %}>Deep (reasoning model)</option>
+        </select>
+      </div>
+
       <h3>🕒 Recent Analysis</h3>
       {% for item in state.report_history|reverse %}
       <details>
@@ -158,8 +169,6 @@
     <main class="content">
       <h1>🔍 LogLens AI</h1>
       <p>Forensic analysis for <strong>FSLogix</strong>, <strong>Intune</strong>, and <strong>System</strong> logs.</p>
-      <p class="muted">LLM Provider mode: <strong>{{ backend_provider }}</strong> · Analysis mode: <strong>{{ analysis_mode }}</strong></p>
-
       <section class="stepper" aria-label="Analysis Progress">
         <div class="step complete">
           <span class="step-dot">1</span>
@@ -211,11 +220,6 @@
           <div>
             <h3>⚙️ Settings</h3>
             <label><input type="checkbox" name="sanitize" /> Strip PII (Usernames/SIDs)</label>
-            <label for="analysis_mode">Analysis Depth</label>
-            <select name="analysis_mode" id="analysis_mode">
-              <option value="default" {% if analysis_mode == "default" %}selected{% endif %}>Default (gpt-5.2-chat)</option>
-              <option value="deep" {% if analysis_mode == "deep" %}selected{% endif %}>Deep analysis (reasoning model)</option>
-            </select>
           </div>
           <div>
             <h3>Upload Logs (ZIPs supported)</h3>
