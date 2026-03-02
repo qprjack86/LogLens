@@ -162,6 +162,27 @@ pre { white-space: pre-wrap; background:#0f141d; border:1px solid var(--border);
   font-size: 0.8rem;
   cursor: pointer;
 }
+.sidebar-model {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-model label {
+  display: block;
+  margin-top: 0.5rem;
+  margin-bottom: 0.3rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.sidebar-model select {
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0f141d;
+  color: var(--text);
+  font-size: 0.9rem;
+}
 /* LOADING SPINNER */
 .spinner {
   width: 50px;
