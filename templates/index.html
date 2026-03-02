@@ -6,10 +6,132 @@
   <title>LogLens AI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   <script>
+    const allowedExtensions = [".log", ".zip", ".txt"];
+
     function showLoading() {
       const loader = document.getElementById('loading-overlay');
       if (loader) loader.style.display = 'flex';
+      document.body.classList.add('is-analyzing');
     }
+
+    function setValidationMessage(message) {
+      const box = document.getElementById('client-validation');
+      if (!box) return;
+      box.textContent = message || '';
+      box.style.display = message ? 'block' : 'none';
+    }
+
+    function validateUploads() {
+      const form = document.getElementById('analyze-form');
+      const input = document.getElementById('log_files');
+      if (!form || !input) return true;
+
+      const maxFiles = Number(form.dataset.maxFiles || 10);
+      const maxFileMb = Number(form.dataset.maxFileMb || 20);
+      const maxFileBytes = maxFileMb * 1024 * 1024;
+      const files = Array.from(input.files || []);
+
+      if (!files.length) {
+        setValidationMessage('Please select at least one log file.');
+        return false;
+      }
+
+      if (files.length > maxFiles) {
+        setValidationMessage(`Too many files selected. Maximum allowed is ${maxFiles}.`);
+        return false;
+      }
+
+      for (const file of files) {
+        const name = file.name || '';
+        const lower = name.toLowerCase();
+        const allowed = allowedExtensions.some(ext => lower.endsWith(ext));
+        if (!allowed) {
+          setValidationMessage(`Unsupported file type: ${name}. Allowed: .log, .txt, .zip`);
+          return false;
+        }
+
+        if (file.size > maxFileBytes) {
+          setValidationMessage(`File too large: ${name}. Maximum per-file size is ${maxFileMb}MB.`);
+          return false;
+        }
+      }
+
+      setValidationMessage('');
+      return true;
+    }
+
+    function handleAnalyzeSubmit(event) {
+      if (!validateUploads()) {
+        if (event) event.preventDefault();
+        return false;
+      }
+      showLoading();
+      return true;
+    }
+
+    async function copyText(text, button) {
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const temp = document.createElement('textarea');
+        temp.value = text;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
+      }
+
+      if (button) {
+        const previous = button.textContent;
+        button.textContent = 'Copied';
+        setTimeout(() => {
+          button.textContent = previous;
+        }, 1200);
+      }
+    }
+
+    function wireCopyButtons() {
+      const tables = document.querySelectorAll('.panel.markdown table');
+      tables.forEach((table) => {
+        const headerCells = Array.from(table.querySelectorAll('thead th')).map(
+          (cell) => cell.textContent.trim().toLowerCase()
+        );
+        if (headerCells.length !== 3 || headerCells[0] !== 'phase' || headerCells[1] !== 'action' || headerCells[2] !== 'command') {
+          return;
+        }
+
+        table.querySelectorAll('tbody tr').forEach((row) => {
+          const commandCell = row.querySelector('td:nth-child(3)');
+          if (!commandCell || commandCell.querySelector('.copy-command-btn')) return;
+
+          const commandText = commandCell.innerText.trim();
+          if (!commandText) return;
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'copy-command-btn';
+          btn.textContent = 'Copy';
+          btn.addEventListener('click', () => copyText(commandText, btn));
+
+          const wrap = document.createElement('div');
+          wrap.className = 'command-cell-wrap';
+          while (commandCell.firstChild) {
+            wrap.appendChild(commandCell.firstChild);
+          }
+          commandCell.appendChild(wrap);
+          commandCell.appendChild(btn);
+        });
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const input = document.getElementById('log_files');
+      if (input) {
+        input.addEventListener('change', validateUploads);
+      }
+      wireCopyButtons();
+    });
   </script>
 </head>
 <body>
@@ -38,6 +160,21 @@
       <p>Forensic analysis for <strong>FSLogix</strong>, <strong>Intune</strong>, and <strong>System</strong> logs.</p>
       <p class="muted">LLM Provider mode: <strong>{{ backend_provider }}</strong> · Analysis mode: <strong>{{ analysis_mode }}</strong></p>
 
+      <section class="stepper" aria-label="Analysis Progress">
+        <div class="step complete">
+          <span class="step-dot">1</span>
+          <span>Upload</span>
+        </div>
+        <div class="step {% if analysis_part1 %}complete{% else %}analyze-step{% endif %}">
+          <span class="step-dot">2</span>
+          <span>Analyzing</span>
+        </div>
+        <div class="step {% if analysis_part1 %}complete{% endif %}">
+          <span class="step-dot">3</span>
+          <span>Results</span>
+        </div>
+      </section>
+
       {% if has_missing_config %}
       <div class="alert error">
         <strong>Model backend configuration is incomplete.</strong><br />
@@ -60,7 +197,16 @@
         {% endif %}
       {% endwith %}
 
-      <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data" class="panel" onsubmit="showLoading()">
+      <form
+        action="{{ url_for('analyze') }}"
+        method="post"
+        enctype="multipart/form-data"
+        class="panel"
+        id="analyze-form"
+        data-max-files="{{ max_upload_files }}"
+        data-max-file-mb="{{ max_upload_file_mb }}"
+        onsubmit="return handleAnalyzeSubmit(event)"
+      >
         <div class="two-col">
           <div>
             <h3>⚙️ Settings</h3>
@@ -73,7 +219,8 @@
           </div>
           <div>
             <h3>Upload Logs (ZIPs supported)</h3>
-            <input type="file" name="log_files" accept=".log,.zip,.txt" multiple required />
+            <input id="log_files" type="file" name="log_files" accept=".log,.zip,.txt" multiple required />
+            <div id="client-validation" class="client-validation" role="alert" style="display:none;"></div>
           </div>
         </div>
         <button type="submit" class="primary">Run Analysis</button>
